@@ -1,0 +1,9 @@
+[package]
+name = "zero_claw"
+type = "bin"
+authors = ["Joe Lee / DevGruGold", "David Elze"]
+compiler_version = "0.33.0"
+
+[dependencies]
+# Poseidon2 hash is built into Noir stdlib since recent versions
+# No external deps needed for basic circuit

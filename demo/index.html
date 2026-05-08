@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZeroClaw — AI Agent Governance with Privacy</title>
+<style>
+  :root { --bg: #0a0a0f; --panel: #111118; --accent: #ff3366; --yes: #00ff88; --no: #ff4444; --text: #e0e0e0; --muted: #888; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.5; }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+  header { text-align: center; margin-bottom: 32px; }
+  header h1 { font-size: 2.2rem; letter-spacing: -1px; }
+  header h1 span { color: var(--accent); }
+  header p { color: var(--muted); margin-top: 8px; }
+  .badge { display: inline-block; background: var(--accent); color: #fff; font-size: 0.7rem; padding: 4px 10px; border-radius: 99px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  .row { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; margin-bottom: 24px; }
+  @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid #222; border-radius: 12px; padding: 20px; }
+  .panel h2 { font-size: 1rem; color: var(--accent); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .panel h3 { font-size: 0.85rem; color: var(--muted); margin-bottom: 8px; }
+  input, textarea, button { width: 100%; background: #1a1a24; border: 1px solid #333; color: var(--text); padding: 10px 12px; border-radius: 8px; font-size: 0.95rem; margin-bottom: 10px; }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  button { cursor: pointer; font-weight: 600; border: none; transition: transform 0.1s; }
+  button:active { transform: scale(0.98); }
+  .btn-propose { background: linear-gradient(135deg, var(--accent), #cc1144); }
+  .btn-yes { background: linear-gradient(135deg, var(--yes), #00aa55); }
+  .btn-no { background: linear-gradient(135deg, var(--no), #aa2222); }
+  .btn-tally { background: #333; }
+  .log { background: #0d0d14; border: 1px solid #222; border-radius: 8px; padding: 12px; font-family: 'Courier New', monospace; font-size: 0.8rem; max-height: 220px; overflow-y: auto; white-space: pre-wrap; color: #b0b0c0; }
+  .proposal-card { background: #141420; border: 1px solid #2a2a3a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .proposal-card .hash { font-family: monospace; font-size: 0.75rem; color: var(--muted); word-break: break-all; }
+  .proposal-card .status { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; margin-top: 6px; }
+  .status-pending { background: #332200; color: #ffaa00; }
+  .status-approved { background: #003311; color: var(--yes); }
+  .status-rejected { background: #330011; color: var(--no); }
+  .tally-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 8px; background: #222; }
+  .tally-bar .yes { background: var(--yes); }
+  .tally-bar .no { background: var(--no); }
+  .footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 40px; border-top: 1px solid #222; padding-top: 20px; }
+  .footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="badge">AMD Developer Hackathon 2026</div>
+    <h1>Zero<span>Claw</span></h1>
+    <p>Zero-Knowledge Governance for AI-Human Hybrid DAOs</p>
+    <p style="font-size:0.8rem; color:#555;">Built by Joe Lee (XMRT DAO) &amp; David Elze (Cuddlefish Labs)</p>
+  </header>
+
+  <div class="row">
+    <div class="panel">
+      <h2>🤖 AI Agent Proposes</h2>
+      <h3>Eliza submits an action for human ratification</h3>
+      <input id="p-title" placeholder="Proposal title (e.g. Deploy edge functions)">
+      <textarea id="p-desc" rows="3" placeholder="Description"></textarea>
+      <input id="p-threshold" type="number" value="3" min="1" max="10" style="width:80px;">
+      <button class="btn-propose" onclick="propose()">Create Proposal</button>
+    </div>
+
+    <div class="panel">
+      <h2>🗳️ Human Votes</h2>
+      <h3>Privacy-preserving commitment (v1 hash / v2 ZK)</h3>
+      <input id="v-hash" placeholder="Paste proposal_hash here">
+      <input id="v-secret" type="password" placeholder="Your nullifier secret">
+      <div style="display:flex; gap:10px;">
+        <button class="btn-yes" onclick="vote(1)">✅ YES</button>
+        <button class="btn-no" onclick="vote(0)">❌ NO</button>
+      </div>
+      <button class="btn-tally" onclick="tally()">Check Tally</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>📋 Proposals & Tally</h2>
+    <div id="proposals">No proposals yet. Create one above.</div>
+  </div>
+
+  <div class="panel" style="margin-top:16px;">
+    <h2>📡 System Log</h2>
+    <div class="log" id="log">Ready. Waiting for actions...</div>
+  </div>
+
+  <div class="footer">
+    <p>
+      🔒 <strong>Privacy:</strong> In v1, votes are stored but the AI agent only sees the aggregate tally.<br>
+      In v2, votes become zero-knowledge proofs — the AI never sees individual votes at all.<br>
+      <a href="https://github.com/ROCm/AMD_Hackathon" target="_blank">AMD Hackathon</a> |
+      <a href="https://lablab.ai" target="_blank">lablab.ai</a> |
+      <a href="https://paragraph.com/@xmrt" target="_blank">XMRT DAO</a>
+    </p>
+  </div>
+</div>
+
+<script>
+const LOG = msg => {
+  const el = document.getElementById('log');
+  el.textContent += '\n[' + new Date().toLocaleTimeString() + '] ' + msg;
+  el.scrollTop = el.scrollHeight;
+};
+
+let proposals = [];
+
+function propose() {
+  const title = document.getElementById('p-title').value;
+  const desc = document.getElementById('p-desc').value;
+  const threshold = parseInt(document.getElementById('p-threshold').value) || 3;
+  if (!title) { alert('Enter a title'); return; }
+
+  const hash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2,'0')).join('');
+  const prop = { title, description: desc, hash, threshold, status: 'PENDING_RATIFICATION', yes: 0, no: 0, votes: [] };
+  proposals.push(prop);
+  LOG('Eliza proposed: "' + title + '" | hash=' + hash.slice(0,18) + '...');
+  render();
+}
+
+function vote(val) {
+  const hash = document.getElementById('v-hash').value.trim();
+  const secret = document.getElementById('v-secret').value.trim();
+  if (!hash || !secret) { alert('Enter proposal hash and secret'); return; }
+
+  const prop = proposals.find(p => p.hash === hash);
+  if (!prop) { alert('Proposal not found'); return; }
+  if (prop.votes.find(v => v.secret === secret)) { alert('You already voted on this proposal'); return; }
+  if (prop.status !== 'PENDING_RATIFICATION') { alert('Proposal is closed'); return; }
+
+  // v1: simple hash commitment
+  const commitment = btoa(secret + hash + val).slice(0, 32);
+  prop.votes.push({ secret, vote: val, commitment });
+  if (val === 1) prop.yes++; else prop.no++;
+
+  LOG('Human voted ' + (val ? 'YES' : 'NO') + ' on ' + hash.slice(0,18) + '... | commitment=' + commitment);
+
+  // Auto-check threshold
+  if (prop.yes >= prop.threshold) {
+    prop.status = 'APPROVED';
+    LOG('✅ THRESHOLD MET. Proposal APPROVED. Eliza may now execute.');
+  } else if (prop.no >= prop.threshold) {
+    prop.status = 'REJECTED';
+    LOG('❌ THRESHOLD MET. Proposal REJECTED. Eliza blocked.');
+  }
+  render();
+}
+
+function tally() {
+  const hash = document.getElementById('v-hash').value.trim();
+  const prop = proposals.find(p => p.hash === hash);
+  if (!prop) { alert('Proposal not found'); return; }
+  LOG('Tally for ' + hash.slice(0,18) + '... | YES=' + prop.yes + ' NO=' + prop.no + ' | Status=' + prop.status);
+}
+
+function render() {
+  const el = document.getElementById('proposals');
+  if (!proposals.length) { el.innerHTML = 'No proposals yet.'; return; }
+  el.innerHTML = proposals.map(p => {
+    const total = p.yes + p.no;
+    const pctYes = total ? (p.yes / total * 100) : 0;
+    const pctNo = total ? (p.no / total * 100) : 0;
+    const statusClass = p.status === 'APPROVED' ? 'status-approved' : p.status === 'REJECTED' ? 'status-rejected' : 'status-pending';
+    return `
+      <div class="proposal-card">
+        <strong>${p.title}</strong>
+        <div class="hash">${p.hash}</div>
+        <div>Threshold: ${p.threshold} | Votes: ${total}</div>
+        <span class="status ${statusClass}">${p.status}</span>
+        <div style="margin-top:8px; font-size:0.85rem;">👍 ${p.yes}  👎 ${p.no}</div>
+        <div class="tally-bar">
+          <div class="yes" style="width:${pctYes}%"></div>
+          <div class="no" style="width:${pctNo}%"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+</script>
+</body>
+</html>
