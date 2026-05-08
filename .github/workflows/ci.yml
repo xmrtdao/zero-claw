@@ -1,0 +1,86 @@
+name: ZeroClaw CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      
+      - name: Start Supabase Local
+        run: supabase start
+      
+      - name: Validate Edge Functions
+        run: |
+          supabase functions serve propose-action &
+          sleep 2
+          curl -s -o /dev/null -w "%{http_code}" http://localhost:54321/functions/v1/propose-action
+          echo " propose-action OK"
+          supabase functions serve submit-vote &
+          sleep 2
+          curl -s -o /dev/null -w "%{http_code}" http://localhost:54321/functions/v1/submit-vote
+          echo " submit-vote OK"
+      
+      - name: Test Noir Circuit Compiles
+        uses: noir-lang/noirup@v1
+        with:
+          toolchain: stable
+      - run: |
+          cd circuits
+          nargo check
+          echo "Noir circuit compiles successfully"
+      
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-claw-build
+          path: |
+            supabase/functions/
+            circuits/
+            demo/
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      
+      - name: Link Project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+      
+      - name: Deploy Edge Functions
+        run: |
+          supabase functions deploy propose-action
+          supabase functions deploy submit-vote
+          supabase functions deploy tally-votes
+          supabase functions deploy check-vote
+          supabase functions deploy eliza-direct
+      
+      - name: Apply Database Migrations
+        run: supabase db push
+      
+      - name: Deploy Demo to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./demo
+          destination_dir: demo
