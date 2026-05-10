@@ -1,0 +1,28 @@
+{
+  "name": "zero-claw",
+  "version": "1.0.0",
+  "description": "Zero-knowledge governance for AI-human hybrid DAOs \u2014 AMD Developer Hackathon",
+  "scripts": {
+    "dev": "python3 -m http.server 8080 --directory demo",
+    "build": "echo 'Static deployment - no build step required'",
+    "deploy": "vercel --prod"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "dao",
+    "zero-knowledge",
+    "governance",
+    "amd",
+    "rocm",
+    "hackathon",
+    "eliza",
+    "privacy"
+  ],
+  "author": "XMRT DAO",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xmrtdao/zero-claw.git"
+  }
+}
