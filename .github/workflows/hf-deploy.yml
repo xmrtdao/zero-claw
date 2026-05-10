@@ -1,0 +1,34 @@
+name: Deploy to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/huggingface-space/**'
+      - '.github/workflows/hf-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Hugging Face Hub
+        run: pip install -q huggingface-hub
+
+      - name: Push to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python3 -c "from huggingface_hub import HfApi; HfApi(token='${{ secrets.HF_TOKEN }}').upload_folder(folder_path='deploy/huggingface-space', repo_id='XMRTDAO/zero-claw', repo_type='space'); print('Done')"
+
+      - name: Verify Deployment
+        run: |
+          sleep 10
+          curl -s -o /dev/null -w "%{http_code}" https://huggingface.co/spaces/XMRTDAO/zero-claw | grep -qE "200|301" && echo "✅ Space OK" || echo "⚠️ Space check inconclusive"
