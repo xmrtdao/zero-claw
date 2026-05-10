@@ -1,7 +1,6 @@
 # ZeroClaw
 
-[![HF Space](https://img.shields.io/badge/🤗%20Hugging%20Face-Space-blue)](https://huggingface.co/spaces/XMRTDAO/zero-claw)
-
+[![🤗 HF Space](https://img.shields.io/badge/🤗%20HF%20Space-blue)](https://huggingface.co/spaces/XMRTDAO/zero-claw)
 **Zero-Knowledge Governance for AI-Human Hybrid DAOs**
 
 [![AMD Developer Hackathon](https://img.shields.io/badge/AMD-Hackathon%202026-ED1C24?logo=amd)](https://lablab.ai/ai-hackathons/amd-developer)
