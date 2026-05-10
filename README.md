@@ -1,7 +1,15 @@
 # ZeroClaw
+
 **Zero-Knowledge Governance for AI-Human Hybrid DAOs**
 
-Built for the **AMD Developer Hackathon** (lablab.ai) — May 2026.
+[![AMD Developer Hackathon](https://img.shields.io/badge/AMD-Hackathon%202026-ED1C24?logo=amd)](https://lablab.ai/ai-hackathons/amd-developer)
+[![Track](https://img.shields.io/badge/Track-AI%20Agents%20%26%20Agentic%20Workflows-blueviolet)]()
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Repo](https://img.shields.io/badge/GitHub-xmrtdao%2Fzero--claw-black?logo=github)](https://github.com/xmrtdao/zero-claw)
+
+> AI proposes. Humans privately ratify. Zero-knowledge proofs verify ratification without revealing who voted or how.
+
+Built for the **AMD Developer Hackathon** (lablab.ai) — May 2026.  
 By **Joe Lee (DevGruGold / XMRT DAO)** and **David Elze (Cuddlefish Labs)**.
 
 ---
@@ -17,27 +25,27 @@ AI agents like Eliza propose actions autonomously. But who verifies those propos
 ## Architecture
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+┌────────────┐     ┌────────────┐     ┌────────────┐
 │   Eliza /    │     │   Human      │     │   ZK Prover  │
 │   AI Agent   │     │   Voter      │     │   (AMD GPU)  │
-└──────┬───────┘     └──────┬───────┘     └──────┬───────┘
-       │                    │                    │
-       │ propose-action     │                    │
-       │────────────────────►                    │
-       │                    │                    │
-       │                    │ generate proof     │
-       │                    │────────────────────►
-       │                    │                    │
-       │                    │ submit-vote        │
-       │                    │────────────────────►
-       │                    │                    │
-       │◄──────────────────── check-vote         │
-       │                    │                    │
-       │ tally-votes        │                    │
-       │────────────────────►                    │
-       │                    │                    │
-       │ execute if APPROVED                     │
-       │◄────────────────────                    │
+└────┬──┘────┘     └────┬──┘────┘     └────┬──┘────┘
+     │                    │                    │
+     │ propose-action     │                    │
+     │────────────────────►                    │
+     │                    │                    │
+     │                    │ generate proof     │
+     │                    │────────────────────►
+     │                    │                    │
+     │                    │ submit-vote        │
+     │                    │────────────────────►
+     │                    │                    │
+     │◀─────────────────── check-vote         │
+     │                    │                    │
+     │ tally-votes        │                    │
+     │────────────────────►                    │
+     │                    │                    │
+     │ execute if APPROVED │                    │
+     │◀───────────────────                    │
 ```
 
 ---
@@ -69,6 +77,7 @@ supabase functions deploy propose-action
 supabase functions deploy submit-vote
 supabase functions deploy tally-votes
 supabase functions deploy check-vote
+supabase functions deploy eliza-direct
 ```
 
 ### 3. Create a Proposal (Eliza or any agent)
@@ -134,6 +143,50 @@ All inputs are `Field` elements using Poseidon2 hashing. The `proposal_hash` is 
 
 ---
 
+## Deployment
+
+### Vercel (Demo UI)
+```bash
+npm i -g vercel
+vercel --prod
+```
+
+### Supabase (Backend)
+See [DEPLOY.md](DEPLOY.md) for detailed Supabase edge function deployment steps.
+
+### Hugging Face Space
+Coming soon — Gradio wrapper for interactive ZK governance demo.
+
+---
+
+## Project Structure
+
+```
+zero-claw/
+├── README.md               # This file
+├── LICENSE                 # MIT
+├── package.json            # Vercel deployment config
+├── vercel.json             # Vercel routes
+├── DEPLOY.md               # Supabase deployment guide
+├── HACKATHON_BLOG.md       # Build-in-public blog post
+├── demo/
+│   └── index.html            # Interactive governance demo
+├── circuits/
+│   ├── Nargo.toml            # Noir circuit config
+│   └── main.nr               # ZK circuit source
+├── supabase/
+│   ├── schema.sql            # DB schema + RLS policies
+│   └── functions/
+│       ├── propose-action/     # AI agent proposal endpoint
+│       ├── submit-vote/        # Human vote endpoint
+│       ├── tally-votes/        # Vote aggregation
+│       ├── check-vote/         # Eliza gatekeeper check
+│       └── eliza-direct/       # Direct AI chat (no gatekeeper)
+└── e2e_test.py             # End-to-end test script
+```
+
+---
+
 ## Demo
 
 Open `demo/index.html` in a browser or deploy as a **Hugging Face Space**.
@@ -164,9 +217,9 @@ Shows:
 
 ## Prizes We're Targeting
 
-- **🤖 AI Agents & Agentic Workflows Track** — ZeroClaw IS an agent governance layer
-- **🚢 Ship It + Build in Public** — We already blog on Paragraph/Medium; just need to tag @AIatAMD
-- **🏆 Hugging Face Category Prize** — Most likes on HF Space wins
+- **AI Agents & Agentic Workflows Track** — ZeroClaw IS an agent governance layer
+- **Ship It + Build in Public** — We blog on Paragraph/Medium; tag @AIatAMD
+- **Hugging Face Category Prize** — Most likes on HF Space wins
 
 ---
 
@@ -176,8 +229,8 @@ Shows:
 - **AMD AI Developer Program:** https://www.amd.com/en/developer/ai-dev-program.html
 - **ROCm Docs:** https://rocm.docs.amd.com/
 - **XMRT DAO:** https://paragraph.com/@xmrt
-- **Joe Lee (DevGruGold):** https://josephandrewlee.medium.com
-- **David Elze:** Cuddlefish Labs
+- **Joe Lee:** https://josephandrewlee.medium.com
+- **Repo:** https://github.com/xmrtdao/zero-claw
 
 ---
 
