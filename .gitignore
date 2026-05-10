@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.egg-info/
+.env
+.env.local
+
+# Build outputs
+dist/
+build/
+*.zip
+*.tar.gz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Models / circuits
+*.pt
+*.pth
+*.onnx
+*.gguf
+models/
+checkpoints/
+*.proof
+*.vk
+
+# Noir
+proofs/
+target/
+
+# Logs
+*.log
+logs/
+
+# Supabase
+.supabase/
