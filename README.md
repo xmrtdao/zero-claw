@@ -81,6 +81,9 @@ supabase functions deploy check-vote
 supabase functions deploy eliza-direct
 ```
 
+
+![Architecture Diagram](https://raw.githubusercontent.com/xmrtdao/zero-claw/main/architecture.svg)
+*Detailed system pipeline — view full resolution in browser*
 ### 3. Create a Proposal (Eliza or any agent)
 
 ```bash
