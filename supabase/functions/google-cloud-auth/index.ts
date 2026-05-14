@@ -1,0 +1,1378 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { SignJWT, importPKCS8 } from 'https://deno.land/x/jose@v4.15.5/index.ts';
+import { extractUserContext } from "../_shared/googleAuthHelper.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+
+// Gmail API
+const GMAIL_API_URL = 'https://gmail.googleapis.com/gmail/v1';
+// Drive API
+const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
+// Sheets API
+const SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
+// Calendar API
+const CALENDAR_API_URL = 'https://www.googleapis.com/calendar/v3';
+
+// Comprehensive scopes for full Google Cloud access
+const SCOPES = [
+  // Gemini/AI
+  'https://www.googleapis.com/auth/generative-language.retriever',
+  'https://www.googleapis.com/auth/generative-language.tuning',
+  'https://www.googleapis.com/auth/cloud-platform',
+  // Gmail
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.modify',
+  // Google Drive
+  'https://www.googleapis.com/auth/drive',
+  // Google Sheets
+  'https://www.googleapis.com/auth/spreadsheets',
+  // Google Calendar
+  'https://www.googleapis.com/auth/calendar',
+  // Cloud Storage
+  'https://www.googleapis.com/auth/devstorage.full_control',
+  // Identity
+  'openid',
+  'email',
+  'profile'
+].join(' ');
+
+interface TokenResponse {
+  access_token: string;
+  expires_in: number;
+  token_type: string;
+  scope: string;
+  refresh_token?: string;
+}
+
+// Helper to get fresh access token
+async function getAccessToken(userCtx?: { userId?: string; userEmail?: string }): Promise<string | null> {
+  const clientId = Deno.env.get('GOOGLE_CLIENT_ID')?.trim();
+  const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET')?.trim();
+  let refreshToken = (Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN'))?.trim();
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (supabaseUrl && supabaseKey) {
+      const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Try to find a valid token from the database
+      // We order by connected_at to get the most recent one
+      let q = supabase
+        .from('oauth_connections')
+        .select('refresh_token')
+        .eq('provider', 'google_cloud')
+        .eq('is_active', true);
+
+      if (userCtx?.userId) {
+        q = q.eq('user_id', userCtx.userId);
+      } else if (userCtx?.userEmail) {
+        q = q.eq('account_email', userCtx.userEmail.toLowerCase());
+      } else {
+        // No user context for user token mode: do not accidentally pick another user's token.
+        q = q.limit(0);
+      }
+
+      const { data } = await q
+        .order('connected_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data?.refresh_token) {
+        console.log('Using refresh token from oauth_connections table');
+        refreshToken = data.refresh_token;
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching refresh token from DB in getAccessToken:', err);
+  }
+
+  // 2. Fallback to Env Vars if not in DB
+  if (!refreshToken) {
+    refreshToken = Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN');
+    if (refreshToken) console.log('Using refresh token from Environment Variables');
+  }
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    console.error(`Missing Google OAuth credentials: clientId=${!!clientId}, clientSecret=${!!clientSecret}, refreshToken=${!!refreshToken}`);
+    return null;
+  }
+
+  const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    })
+  });
+
+  if (!tokenResponse.ok) {
+    console.error('Token refresh failed:', await tokenResponse.text());
+    return null;
+  }
+
+  const tokens: TokenResponse = await tokenResponse.json();
+  return tokens.access_token;
+}
+
+// Service Account Token Implementation
+async function getServiceAccountToken(scopes: string[] = SCOPES.split(' ')): Promise<string | null> {
+  try {
+    const serviceAccountJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT');
+    if (!serviceAccountJson) {
+      console.log('GOOGLE_SERVICE_ACCOUNT not configured');
+      return null;
+    }
+
+    const serviceAccount = JSON.parse(serviceAccountJson);
+    const privateKey = serviceAccount.private_key;
+    const clientEmail = serviceAccount.client_email;
+    const project_id = serviceAccount.project_id; // useful to log checking
+
+    if (!privateKey || !clientEmail) {
+      console.error('Invalid GOOGLE_SERVICE_ACCOUNT JSON: missing private_key or client_email');
+      return null;
+    }
+
+    // Create JWT
+    const algorithm = 'RS256';
+    const pkcs8 = await importPKCS8(privateKey, algorithm);
+
+    const jwt = await new SignJWT({
+      scope: scopes.join(' ')
+    })
+      .setProtectedHeader({ alg: algorithm })
+      .setIssuer(clientEmail)
+      .setSubject(clientEmail)
+      .setAudience(GOOGLE_TOKEN_URL)
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(pkcs8);
+
+    console.log(`🔐 [ServiceAccount] Signing JWT for email: ${clientEmail}, Project ID: ${project_id}`);
+
+    // Exchange JWT for Access Token
+    console.log('[ServiceAccount] Exchanging JWT for Access Token at ' + GOOGLE_TOKEN_URL);
+    const response = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: jwt
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ [ServiceAccount] Token exchange failed! Status: ${response.status} ${response.statusText}`);
+      console.error(`❌ [ServiceAccount] Error details: ${errorText}`);
+      return null;
+    }
+
+    console.log(`✅ [ServiceAccount] Token exchange successful! Status: ${response.status}`);
+
+    const data = await response.json();
+    return data.access_token;
+
+  } catch (error) {
+    console.error('Error getting Service Account token:', error);
+    return null;
+  }
+}
+
+// ============= GMAIL ACTIONS =============
+async function sendEmail(accessToken: string, to: string, subject: string, body: string, isHtml = false) {
+  const message = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
+    '',
+    body
+  ].join('\r\n');
+
+  const encodedMessage = btoa(unescape(encodeURIComponent(message)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  const response = await fetch(`${GMAIL_API_URL}/users/me/messages/send`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ raw: encodedMessage })
+  });
+
+  return response.json();
+}
+
+async function listEmails(accessToken: string, query = '', maxResults = 20) {
+  const params = new URLSearchParams({ maxResults: String(maxResults) });
+  if (query) params.set('q', query);
+
+  const response = await fetch(`${GMAIL_API_URL}/users/me/messages?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  const data = await response.json();
+  if (!data.messages) return { messages: [], count: 0 };
+
+  // Get first 5 message details for preview
+  const previews = await Promise.all(
+    data.messages.slice(0, 5).map(async (msg: any) => {
+      const detailResponse = await fetch(`${GMAIL_API_URL}/users/me/messages/${msg.id}?format=metadata`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const detail = await detailResponse.json();
+      const headers = detail.payload?.headers || [];
+      return {
+        id: msg.id,
+        subject: headers.find((h: any) => h.name === 'Subject')?.value || '(no subject)',
+        from: headers.find((h: any) => h.name === 'From')?.value || 'unknown',
+        date: headers.find((h: any) => h.name === 'Date')?.value || ''
+      };
+    })
+  );
+
+  return { messages: previews, total: data.resultSizeEstimate || data.messages.length };
+}
+
+async function getEmail(accessToken: string, messageId: string) {
+  const response = await fetch(`${GMAIL_API_URL}/users/me/messages/${messageId}?format=full`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  return response.json();
+}
+
+async function createDraft(accessToken: string, to: string, subject: string, body: string) {
+  const message = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    body
+  ].join('\r\n');
+
+  const encodedMessage = btoa(unescape(encodeURIComponent(message)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  const response = await fetch(`${GMAIL_API_URL}/users/me/drafts`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ message: { raw: encodedMessage } })
+  });
+
+  return response.json();
+}
+
+// ============= DRIVE ACTIONS =============
+async function listDriveFiles(accessToken: string, query = '', maxResults = 20, folderId?: string) {
+  const params = new URLSearchParams({
+    pageSize: String(maxResults),
+    fields: 'files(id,name,mimeType,createdTime,modifiedTime,size,webViewLink)'
+  });
+
+  let q = query;
+  if (folderId) {
+    q = q ? `${q} and '${folderId}' in parents` : `'${folderId}' in parents`;
+  }
+  if (q) params.set('q', q);
+
+  const response = await fetch(`${DRIVE_API_URL}/files?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  return response.json();
+}
+
+async function uploadDriveFile(accessToken: string, fileName: string, content: string, mimeType = 'text/plain', folderId?: string) {
+  const metadata: any = { name: fileName };
+  if (folderId) metadata.parents = [folderId];
+
+  // Create file with multipart upload
+  const boundary = 'foo_bar_baz';
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    `Content-Type: ${mimeType}`,
+    '',
+    content,
+    `--${boundary}--`
+  ].join('\r\n');
+
+  const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`
+    },
+    body
+  });
+
+  return response.json();
+}
+
+async function getDriveFile(accessToken: string, fileId: string) {
+  const response = await fetch(`${DRIVE_API_URL}/files/${fileId}?fields=*`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  return response.json();
+}
+
+async function downloadDriveFile(accessToken: string, fileId: string) {
+  const response = await fetch(`${DRIVE_API_URL}/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  return response.text();
+}
+
+async function createDriveFolder(accessToken: string, folderName: string, parentFolderId?: string) {
+  const metadata: any = {
+    name: folderName,
+    mimeType: 'application/vnd.google-apps.folder'
+  };
+  if (parentFolderId) metadata.parents = [parentFolderId];
+
+  const response = await fetch(`${DRIVE_API_URL}/files`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(metadata)
+  });
+
+  return response.json();
+}
+
+async function shareDriveFile(accessToken: string, fileId: string, email: string, role = 'reader') {
+  const response = await fetch(`${DRIVE_API_URL}/files/${fileId}/permissions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      type: 'user',
+      role,
+      emailAddress: email
+    })
+  });
+
+  return response.json();
+}
+
+// ============= SHEETS ACTIONS =============
+async function createSpreadsheet(accessToken: string, title: string, sheetName = 'Sheet1') {
+  const response = await fetch(SHEETS_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      properties: { title },
+      sheets: [{ properties: { title: sheetName } }]
+    })
+  });
+
+  return response.json();
+}
+
+async function readSheet(accessToken: string, spreadsheetId: string, range: string) {
+  const response = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/${encodeURIComponent(range)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  return response.json();
+}
+
+async function writeSheet(accessToken: string, spreadsheetId: string, range: string, values: any[][]) {
+  const response = await fetch(
+    `${SHEETS_API_URL}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ values })
+    }
+  );
+  return response.json();
+}
+
+async function appendSheet(accessToken: string, spreadsheetId: string, range: string, values: any[][]) {
+  const response = await fetch(
+    `${SHEETS_API_URL}/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ values })
+    }
+  );
+  return response.json();
+}
+
+async function getSpreadsheetInfo(accessToken: string, spreadsheetId: string) {
+  const response = await fetch(`${SHEETS_API_URL}/${spreadsheetId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  return response.json();
+}
+
+// ============= CALENDAR ACTIONS =============
+async function listCalendarEvents(accessToken: string, calendarId = 'primary', timeMin?: string, timeMax?: string, maxResults = 10) {
+  const params = new URLSearchParams({
+    maxResults: String(maxResults),
+    singleEvents: 'true',
+    orderBy: 'startTime'
+  });
+
+  if (timeMin) params.set('timeMin', timeMin);
+  else params.set('timeMin', new Date().toISOString());
+
+  if (timeMax) params.set('timeMax', timeMax);
+
+  const response = await fetch(`${CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  return response.json();
+}
+
+async function createCalendarEvent(
+  accessToken: string,
+  title: string,
+  startTime: string,
+  endTime: string,
+  description?: string,
+  attendees?: string[],
+  calendarId = 'primary'
+) {
+  const event: any = {
+    summary: title,
+    start: { dateTime: startTime },
+    end: { dateTime: endTime }
+  };
+
+  if (description) event.description = description;
+  if (attendees?.length) {
+    event.attendees = attendees.map(email => ({ email }));
+  }
+
+  const response = await fetch(`${CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId)}/events`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(event)
+  });
+
+  return response.json();
+}
+
+async function updateCalendarEvent(
+  accessToken: string,
+  eventId: string,
+  updates: { title?: string; startTime?: string; endTime?: string; description?: string },
+  calendarId = 'primary'
+) {
+  const event: any = {};
+  if (updates.title) event.summary = updates.title;
+  if (updates.startTime) event.start = { dateTime: updates.startTime };
+  if (updates.endTime) event.end = { dateTime: updates.endTime };
+  if (updates.description) event.description = updates.description;
+
+  const response = await fetch(`${CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(event)
+  });
+
+  return response.json();
+}
+
+async function deleteCalendarEvent(accessToken: string, eventId: string, calendarId = 'primary') {
+  const response = await fetch(`${CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  return { success: response.ok };
+}
+
+async function getCalendarEvent(accessToken: string, eventId: string, calendarId = 'primary') {
+  const response = await fetch(`${CALENDAR_API_URL}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  return response.json();
+}
+
+// Main handler
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const url = new URL(req.url);
+
+    // Parse request body for POST requests first to check for action
+    let body: any = {};
+    if (req.method === 'POST') {
+      try {
+        body = await req.json();
+      } catch {
+        body = {};
+      }
+    }
+    const userContext = extractUserContext(req, body);
+
+    // Auto-detect callback mode when 'code' parameter is present (from Google's redirect)
+    // This allows us to use a redirect URI without query parameters
+    const hasAuthCode = url.searchParams.get('code');
+    const action = hasAuthCode ? 'callback' : (body.action || url.searchParams.get('action') || 'status');
+
+    const clientId = Deno.env.get('GOOGLE_CLIENT_ID')?.trim();
+    const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET')?.trim();
+    const refreshToken = Deno.env.get('GOOGLE_REFRESH_TOKEN')?.trim();
+
+    console.log(`🔐 google-cloud-auth: action=${action}`);
+
+    switch (action) {
+      // ============= OAUTH FLOW =============
+      case 'get_authorization_url': {
+        if (!clientId) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'GOOGLE_CLIENT_ID not configured'
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Force HTTPS for redirect URI - NO query params (auto-detect callback via 'code' param)
+        const redirectUri = `https://${url.host}/functions/v1/google-cloud-auth`;
+
+        const authUrl = new URL(GOOGLE_AUTH_URL);
+        authUrl.searchParams.set('client_id', clientId);
+        authUrl.searchParams.set('redirect_uri', redirectUri);
+        authUrl.searchParams.set('response_type', 'code');
+        authUrl.searchParams.set('scope', SCOPES);
+        authUrl.searchParams.set('access_type', 'offline');
+        authUrl.searchParams.set('prompt', 'consent');
+        const returnTo = typeof body.return_to === 'string' && body.return_to.trim().length > 0
+          ? body.return_to.trim()
+          : null;
+        const encodedReturnTo = returnTo ? encodeURIComponent(returnTo) : null;
+        const oauthState = userContext.userId
+          ? `google_cloud_oauth:${userContext.userId}${encodedReturnTo ? `:${encodedReturnTo}` : ''}`
+          : `google_cloud_oauth${encodedReturnTo ? `:${encodedReturnTo}` : ''}`;
+        authUrl.searchParams.set('state', oauthState);
+
+        return new Response(JSON.stringify({
+          success: true,
+          authorization_url: authUrl.toString(),
+          redirect_uri: redirectUri,
+          scopes_requested: SCOPES.split(' '),
+          instructions: 'Open this URL, sign in with the target Google account, authorize, and the system will automatically update.'
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'callback': {
+        const code = url.searchParams.get('code') || body.code;
+        const state = url.searchParams.get('state') || body.state || '';
+        const stateParts = state.split(':');
+        const stateUserId = state.startsWith('google_cloud_oauth:') ? stateParts[1] : undefined;
+        const stateReturnTo = stateParts.length > 2 ? decodeURIComponent(stateParts.slice(2).join(':')) : null;
+        const callbackUserId = stateUserId || userContext.userId;
+        if (!code) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'No authorization code provided'
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!clientId || !clientSecret) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured'
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Force HTTPS for redirect URI - must match get_authorization_url (no query params)
+        const redirectUri = `https://${url.host}/functions/v1/google-cloud-auth`;
+
+        const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code'
+          })
+        });
+
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text();
+          console.error('Token exchange failed:', errorText);
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Token exchange failed',
+            details: errorText
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const tokens: TokenResponse = await tokenResponse.json();
+
+        // Store in oauth_connections table if we have a refresh token
+        if (tokens.refresh_token) {
+          try {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL');
+            const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+            if (supabaseUrl && supabaseKey) {
+              const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+              const supabase = createClient(supabaseUrl, supabaseKey);
+
+              // Get user info to store email
+              const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                headers: { Authorization: `Bearer ${tokens.access_token}` }
+              });
+              const userInfo = await userInfoResponse.json();
+
+              // Deactivate existing Google Cloud connections only for this user
+              if (callbackUserId) {
+                await supabase
+                  .from('oauth_connections')
+                  .update({ is_active: false })
+                  .eq('provider', 'google_cloud')
+                  .eq('user_id', callbackUserId);
+              }
+
+              // Insert new connection
+              await supabase
+                .from('oauth_connections')
+                .insert({
+                  user_id: callbackUserId || null,
+                  provider: 'google_cloud',
+                  provider_user_id: userInfo.id || null,
+                  provider_email: userInfo.email || null,
+                  account_email: userInfo.email || null,
+                  access_token: tokens.access_token,
+                  refresh_token: tokens.refresh_token,
+                  token_type: tokens.token_type || 'Bearer',
+                  expires_at: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
+                  scopes: tokens.scope ? tokens.scope.split(' ') : SCOPES.split(' '),
+                  is_active: true,
+                  connected_at: new Date().toISOString(),
+                  last_refreshed_at: new Date().toISOString(),
+                  metadata: {
+                    user_info: userInfo,
+                    granted_scopes: tokens.scope
+                  }
+                });
+
+              console.log('✅ OAuth connection saved to database from google-cloud-auth');
+            }
+          } catch (dbErr) {
+            console.error('Failed to save token to database:', dbErr);
+            // Continue anyway as we return the tokens to the UI
+          }
+        }
+
+        const callbackResponse = {
+          success: true,
+          message: 'Authorization successful! Refresh token has been saved to the database.',
+          refresh_token: tokens.refresh_token,
+          access_token: tokens.access_token,
+          expires_in: tokens.expires_in,
+          scope: tokens.scope
+        };
+
+        // Browser redirects from Google are GET requests.
+        // Return an auto-close + redirect page to support popup (desktop) and full-page/mobile flows.
+        if (req.method === 'GET') {
+          const safeReturnTo = stateReturnTo && /^https?:\/\//i.test(stateReturnTo)
+            ? stateReturnTo
+            : null;
+          const fallbackUrl = `${url.origin}/dashboard`;
+          const redirectTarget = safeReturnTo || fallbackUrl;
+          const redirectTargetJson = JSON.stringify(redirectTarget);
+          const payloadJson = JSON.stringify(callbackResponse);
+          const html = `<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Google Cloud Connected</title></head>
+  <body>
+    <script>
+      (function () {
+        const payload = ${payloadJson};
+        const redirectTarget = ${redirectTargetJson};
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'google-cloud-oauth-complete', success: true, data: payload }, '*');
+            window.close();
+            return;
+          }
+        } catch (_) {}
+        window.location.replace(redirectTarget);
+      })();
+    </script>
+    <p>Authorization complete. Redirecting…</p>
+  </body>
+</html>`;
+
+          return new Response(html, {
+            headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' }
+          });
+        }
+
+        return new Response(JSON.stringify(callbackResponse), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'get_access_token': {
+        const authType = body.auth_type || 'user_fallback'; // 'user', 'service_account', 'user_fallback' (default)
+        console.log(`🔑 [get_access_token] Requested auth_type: '${authType}'`);
+
+        let accessToken: string | null = null;
+        let usedMethod = 'none';
+
+        // 1. Service Account
+        if (authType === 'service_account' || authType === 'user_fallback') {
+          // If specifically requested, or if fallback mode, try SA first
+          // (Usually SA is preferred for backend ops if available)
+          if (Deno.env.get('GOOGLE_SERVICE_ACCOUNT')) {
+            accessToken = await getServiceAccountToken();
+            if (accessToken) usedMethod = 'service_account';
+          } else if (authType === 'service_account') {
+            // Explicitly requested but missing
+            return new Response(JSON.stringify({
+              success: false,
+              error: 'GOOGLE_SERVICE_ACCOUNT not configured'
+            }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          }
+        }
+
+        // 2. User OAuth (Refresh Token) 
+        if (!accessToken && (authType === 'user' || authType === 'user_fallback')) {
+          // Fallback to existing user flow
+          if (userContext.userId || userContext.userEmail || refreshToken) {
+            accessToken = await getAccessToken(userContext);
+            if (accessToken) usedMethod = 'user_refresh_token';
+          } else if (authType === 'user') {
+            return new Response(JSON.stringify({
+              success: false,
+              error: 'Google account not connected for this user. Run authorization flow first.',
+              needs_authorization: true
+            }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          }
+        }
+
+        if (!accessToken) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Failed to retrieve access token (no valid credentials found)',
+            needs_reauthorization: true
+          }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          access_token: accessToken,
+          method: usedMethod
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'status': {
+        let hasRefreshToken = (!userContext.userId && !userContext.userEmail) ? !!refreshToken : false;
+        if (!hasRefreshToken) {
+          try {
+            const supabaseUrl = Deno.env.get('SUPABASE_URL');
+            const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+            if (supabaseUrl && supabaseKey) {
+              const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+              const supabase = createClient(supabaseUrl, supabaseKey);
+              let q = supabase
+                .from('oauth_connections')
+                .select('id')
+                .eq('provider', 'google_cloud')
+                .eq('is_active', true);
+              if (userContext.userId) {
+                q = q.eq('user_id', userContext.userId);
+              } else if (userContext.userEmail) {
+                q = q.eq('account_email', userContext.userEmail.toLowerCase());
+              }
+              const { data } = await q.limit(1).maybeSingle();
+              hasRefreshToken = !!data;
+            }
+          } catch (err) {
+            console.error('Error checking refresh token in DB for status:', err);
+          }
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          configured: {
+            client_id: !!clientId,
+            client_secret: !!clientSecret,
+            refresh_token: hasRefreshToken,
+            service_account: !!Deno.env.get('GOOGLE_SERVICE_ACCOUNT')
+          },
+          ready: !!(clientId && clientSecret && hasRefreshToken) || !!Deno.env.get('GOOGLE_SERVICE_ACCOUNT'),
+          available_services: ['gmail', 'drive', 'sheets', 'calendar', 'gemini'],
+          message: !hasRefreshToken
+            ? 'GOOGLE_REFRESH_TOKEN not set. Run authorization flow to obtain it.'
+            : 'Google Cloud OAuth fully configured with Gmail, Drive, Sheets, Calendar access'
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============= GMAIL ACTIONS =============
+      case 'send_email': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const { to, subject, body: emailBody, is_html } = body;
+        if (!to || !subject || !emailBody) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing to, subject, or body' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await sendEmail(accessToken, to, subject, emailBody, is_html);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'list_emails': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await listEmails(accessToken, body.query || '', body.max_results || 20);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'get_email': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.message_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing message_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await getEmail(accessToken, body.message_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'create_draft': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const { to, subject, body: draftBody } = body;
+        if (!to || !subject || !draftBody) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing to, subject, or body' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await createDraft(accessToken, to, subject, draftBody);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============= DRIVE ACTIONS =============
+      case 'list_files': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await listDriveFiles(accessToken, body.query, body.max_results, body.folder_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'upload_file': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.file_name || !body.content) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing file_name or content' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await uploadDriveFile(accessToken, body.file_name, body.content, body.mime_type, body.folder_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'get_file': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.file_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing file_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await getDriveFile(accessToken, body.file_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'download_file': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.file_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing file_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const content = await downloadDriveFile(accessToken, body.file_id);
+        return new Response(JSON.stringify({ success: true, content }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'create_folder': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.folder_name) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing folder_name' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await createDriveFolder(accessToken, body.folder_name, body.parent_folder_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'share_file': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.file_id || !body.email) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing file_id or email' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await shareDriveFile(accessToken, body.file_id, body.email, body.role);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============= SHEETS ACTIONS =============
+      case 'create_spreadsheet': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.title) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing title' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await createSpreadsheet(accessToken, body.title, body.sheet_name);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'read_sheet': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.spreadsheet_id || !body.range) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing spreadsheet_id or range' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await readSheet(accessToken, body.spreadsheet_id, body.range);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'write_sheet': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.spreadsheet_id || !body.range || !body.values) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing spreadsheet_id, range, or values' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await writeSheet(accessToken, body.spreadsheet_id, body.range, body.values);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'append_sheet': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.spreadsheet_id || !body.range || !body.values) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing spreadsheet_id, range, or values' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await appendSheet(accessToken, body.spreadsheet_id, body.range, body.values);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'get_spreadsheet_info': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.spreadsheet_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing spreadsheet_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await getSpreadsheetInfo(accessToken, body.spreadsheet_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============= CALENDAR ACTIONS =============
+      case 'list_events': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await listCalendarEvents(
+          accessToken,
+          body.calendar_id,
+          body.time_min,
+          body.time_max,
+          body.max_results
+        );
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'create_event': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.title || !body.start_time || !body.end_time) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing title, start_time, or end_time' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await createCalendarEvent(
+          accessToken,
+          body.title,
+          body.start_time,
+          body.end_time,
+          body.description,
+          body.attendees,
+          body.calendar_id
+        );
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'update_event': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.event_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing event_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await updateCalendarEvent(
+          accessToken,
+          body.event_id,
+          {
+            title: body.title,
+            startTime: body.start_time,
+            endTime: body.end_time,
+            description: body.description
+          },
+          body.calendar_id
+        );
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'delete_event': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.event_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing event_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await deleteCalendarEvent(accessToken, body.event_id, body.calendar_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'get_event': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        if (!body.event_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing event_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const result = await getCalendarEvent(accessToken, body.event_id, body.calendar_id);
+        return new Response(JSON.stringify({ success: true, result }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // ============= DOCS ACTIONS =============
+      case 'create_doc': {
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        if (!body.title) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing title' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        const docResp = await fetch('https://docs.googleapis.com/v1/documents', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: body.title })
+        });
+        const doc = await docResp.json();
+        if (!docResp.ok) {
+          return new Response(JSON.stringify({ success: false, error: doc.error?.message || 'Docs API error', details: doc }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          docId: doc.documentId,
+          docUrl: `https://docs.google.com/document/d/${doc.documentId}/edit`,
+          title: doc.title
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'append_doc_content': {
+        // Insert structured content into a Google Doc via batchUpdate.
+        // body.doc_id: string, body.requests: array of Docs API request objects
+        // OR body.text: plain text to append at end of doc
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        if (!body.doc_id) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing doc_id' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        let requests = body.requests;
+
+        // Simple text shortcut: if caller passes body.text instead of requests[]
+        if (!requests && body.text) {
+          requests = [{ insertText: { location: { index: 1 }, text: body.text + '\n' } }];
+        }
+
+        if (!requests || !Array.isArray(requests) || requests.length === 0) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing requests array or text' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const batchResp = await fetch(`https://docs.googleapis.com/v1/documents/${body.doc_id}:batchUpdate`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests })
+        });
+        const batchData = await batchResp.json();
+        if (!batchResp.ok) {
+          return new Response(JSON.stringify({ success: false, error: batchData.error?.message || 'batchUpdate error', details: batchData }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({ success: true, docId: body.doc_id, replies: batchData.replies }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      case 'export_doc_pdf': {
+        // Export a Google Doc as PDF, upload the bytes as a new Drive file, return public URL.
+        // body.doc_id: string, body.file_name: string, body.folder_id?: string
+        const accessToken = await getAccessToken(userContext);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        if (!body.doc_id || !body.file_name) {
+          return new Response(JSON.stringify({ success: false, error: 'Missing doc_id or file_name' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        // Export PDF bytes from Drive
+        const exportResp = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${body.doc_id}/export?mimeType=application%2Fpdf`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (!exportResp.ok) {
+          const errText = await exportResp.text();
+          return new Response(JSON.stringify({ success: false, error: `Export failed: ${exportResp.status}`, details: errText }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const pdfBytes = await exportResp.arrayBuffer();
+
+        // Upload PDF as a new Drive file
+        const boundary = 'pdf_upload_boundary';
+        const metadataJson = JSON.stringify({
+          name: body.file_name,
+          mimeType: 'application/pdf',
+          ...(body.folder_id ? { parents: [body.folder_id] } : {})
+        });
+
+        // Build multipart body manually (ArrayBuffer content)
+        const encoder = new TextEncoder();
+        const preamble = encoder.encode(
+          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadataJson}\r\n--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`
+        );
+        const postamble = encoder.encode(`\r\n--${boundary}--`);
+        const combined = new Uint8Array(preamble.byteLength + pdfBytes.byteLength + postamble.byteLength);
+        combined.set(preamble, 0);
+        combined.set(new Uint8Array(pdfBytes), preamble.byteLength);
+        combined.set(postamble, preamble.byteLength + pdfBytes.byteLength);
+
+        const uploadResp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`
+          },
+          body: combined
+        });
+        const uploadData = await uploadResp.json();
+        if (!uploadResp.ok) {
+          return new Response(JSON.stringify({ success: false, error: uploadData.error?.message || 'PDF upload error', details: uploadData }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          pdfFileId: uploadData.id,
+          pdfUrl: uploadData.webViewLink || `https://drive.google.com/file/d/${uploadData.id}/view`,
+          downloadUrl: uploadData.webContentLink,
+          fileName: uploadData.name
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      default:
+        return new Response(JSON.stringify({
+          success: false,
+          error: `Unknown action: ${action}`,
+          available_actions: [
+            // OAuth
+            'get_authorization_url', 'callback', 'get_access_token', 'status',
+            // Gmail
+            'send_email', 'list_emails', 'get_email', 'create_draft',
+            // Drive
+            'list_files', 'upload_file', 'get_file', 'download_file', 'create_folder', 'share_file',
+            // Docs
+            'create_doc', 'append_doc_content', 'export_doc_pdf',
+            // Sheets
+            'create_spreadsheet', 'read_sheet', 'write_sheet', 'append_sheet', 'get_spreadsheet_info',
+            // Calendar
+            'list_events', 'create_event', 'update_event', 'delete_event', 'get_event'
+          ]
+        }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+  } catch (error) {
+    console.error('google-cloud-auth error:', error);
+    return new Response(JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+});
+        const state = url.searchParams.get('state') || body.state || '';
+        const stateUserId = state.startsWith('google_cloud_oauth:') ? state.split(':')[1] : undefined;
+        const callbackUserId = stateUserId || userContext.userId;

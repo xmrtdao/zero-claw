@@ -1,0 +1,472 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0'
+import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
+
+const FUNCTION_NAME = 'mining-proxy';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Monero atomic units conversion: 1 XMR = 10^12 atomic units
+const MONERO_ATOMIC_UNITS = 1000000000000;
+
+function atomicUnitsToXMR(atomicUnits: number): number {
+  return atomicUnits / MONERO_ATOMIC_UNITS;
+}
+
+serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  const usageTracker = startUsageTracking(FUNCTION_NAME, undefined, { method: req.method });
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabase = createClient(supabaseUrl, supabaseKey)
+
+    const url = new URL(req.url);
+    const path = url.pathname;
+
+    // ============================================================
+    // Referral endpoints
+    // ============================================================
+
+    // GET /referral-code/:wallet — Get or create a referral code for a wallet
+    if (path.includes('/referral-code') && req.method === 'GET') {
+      const wallet = url.searchParams.get('wallet') || path.split('/referral-code/')[1];
+      if (!wallet) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'wallet parameter required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const { data, error } = await supabase.rpc('api_get_referral_code', { p_wallet: wallet });
+      if (error) {
+        console.error('Referral code error:', error);
+        return new Response(
+          JSON.stringify({ success: false, error: error.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, referral_code: data }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // GET /referral-dashboard/:wallet — Get referral stats for a wallet
+    if (path.includes('/referral-dashboard') && req.method === 'GET') {
+      const wallet = url.searchParams.get('wallet') || path.split('/referral-dashboard/')[1];
+      if (!wallet) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'wallet parameter required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const { data, error } = await supabase.rpc('api_get_referral_dashboard', { p_wallet: wallet });
+      if (error) {
+        console.error('Referral dashboard error:', error);
+        return new Response(
+          JSON.stringify({ success: false, error: error.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, dashboard: data }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // POST /apply-referral — Record a referral when someone registers with a code
+    if (path.includes('/apply-referral') && req.method === 'POST') {
+      const body = await req.json();
+      const { referral_code, referred_wallet, referred_worker_id } = body;
+
+      if (!referral_code) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'referral_code is required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const { data, error } = await supabase.rpc('apply_referral_code', {
+        p_referral_code: referral_code,
+        p_referred_wallet: referred_wallet || null,
+        p_referred_worker_id: referred_worker_id || null
+      });
+
+      if (error) {
+        console.error('Apply referral error:', error);
+        return new Response(
+          JSON.stringify({ success: false, error: error.message }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, referral_link_id: data, message: 'Referral applied successfully' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ============================================================
+    // Worker registration endpoint (POST /worker or /register)
+    // ============================================================
+    if ((path.includes('/worker') || path.includes('/register')) && req.method === 'POST') {
+      const body = await req.json();
+      const { worker_id, wallet, alias, user_id, session_key, referral_code } = body;
+
+      if (!worker_id || !wallet) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Missing required fields: worker_id and wallet'
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+      }
+
+      console.log('Registering worker:', worker_id, 'for wallet:', wallet);
+
+      // Store worker registration in user_worker_mappings table
+      const { data: workerData, error: workerError } = await supabase
+        .from('user_worker_mappings')
+        .upsert({
+          worker_id,
+          wallet_address: wallet,
+          alias: alias || null,
+          user_id: user_id || null,
+          session_key: session_key || null,
+          device_type: body.device_type || 'unknown',
+          registration_method: body.registration_method || 'direct',
+          last_active: new Date().toISOString(),
+          is_active: true,
+          metadata: {
+            registered_via: 'mobile_miner',
+            timestamp: body.timestamp || Date.now(),
+            user_agent: req.headers.get('user-agent') || 'unknown'
+          }
+        }, {
+          onConflict: 'worker_id'
+        })
+        .select()
+        .single();
+
+      if (workerError) {
+        console.error('Worker registration error:', workerError);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Failed to register worker',
+            details: workerError.message
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+      }
+
+      console.log('Worker registered successfully:', workerData);
+
+      // If referral_code was provided, apply the referral link
+      let referralResult = null;
+      if (referral_code) {
+        try {
+          const { data: refData, error: refError } = await supabase.rpc('apply_referral_code', {
+            p_referral_code: referral_code,
+            p_referred_wallet: wallet || null,
+            p_referred_worker_id: worker_id || null
+          });
+          if (refError) {
+            console.warn('Referral code application failed (non-fatal):', refError.message);
+          } else {
+            referralResult = { referral_link_id: refData };
+            console.log('Referral applied:', refData, 'for worker:', worker_id);
+          }
+        } catch (refErr: any) {
+          console.warn('Referral code application error (non-fatal):', refErr?.message);
+        }
+      }
+
+      // Get or create the worker's own referral code
+      let ownReferralCode = null;
+      if (wallet) {
+        try {
+          const { data: codeData } = await supabase.rpc('api_get_referral_code', { p_wallet: wallet });
+          ownReferralCode = codeData;
+        } catch { /* non-fatal */ }
+      }
+
+      const responsePayload: any = {
+        success: true,
+        worker: workerData,
+        message: 'Worker registered successfully'
+      };
+      if (referralResult) responsePayload.referral = referralResult;
+      if (ownReferralCode) responsePayload.your_referral_code = ownReferralCode;
+
+      return new Response(
+        JSON.stringify(responsePayload),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    const minerAddress = Deno.env.get('MINER_WALLET_ADDRESS') || '46UxNFuGM2E3UwmZWWJicaRPoRwqwW4byQkaTHkX8yPcVihp91qAVtSFipWUGJJUyTXgzSqxzDQtNLf2bsp2DX2qCCgC5mg';
+    const apiUrl = `https://www.supportxmr.com/api/miner/${minerAddress}/stats/`;
+
+    console.log('Fetching mining stats from SupportXMR:', apiUrl);
+    console.log('Using miner address:', minerAddress);
+
+    const response = await fetch(apiUrl, {
+      headers: {
+        'User-Agent': 'XMRT-DAO/1.0',
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('Mining API error:', response.status, response.statusText);
+      throw new Error(`Mining API returned ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log('Mining stats fetched successfully');
+    console.log('Full API Response:', JSON.stringify(data, null, 2));
+
+    // The SupportXMR API returns data in format: { "amtDue": ..., "amtPaid": ..., "hash": ..., etc. }
+    // Not in a nested structure. Let's adapt to whatever structure comes back.
+
+    // Build worker list from perWorkerStats if present
+    const workers = [];
+    if (data.perWorkerStats && Array.isArray(data.perWorkerStats) && data.perWorkerStats.length > 0) {
+      console.log(`Processing ${data.perWorkerStats.length} workers from perWorkerStats`);
+      for (const worker of data.perWorkerStats) {
+        const workerId = worker.identifier || worker.identifer || worker.id || 'unknown';
+
+        // Update worker_registrations (legacy table for compatibility)
+        const { error: legacyError } = await supabase
+          .from('worker_registrations')
+          .upsert({
+            worker_id: workerId,
+            ip_address: '0.0.0.0',
+            last_seen: new Date().toISOString(),
+            is_active: true,
+            metadata: {
+              hash_rate: worker.hash || 0,
+              valid_shares: worker.validShares || 0,
+              invalid_shares: worker.invalidShares || 0,
+              last_hash_time: worker.lastHash || worker.lts || 0,
+            }
+          }, {
+            onConflict: 'worker_id'
+          });
+
+        if (legacyError) {
+          console.error('Failed to update legacy worker_registrations:', workerId, legacyError);
+        }
+
+        // Update user_worker_mappings with latest stats from pool
+        const { data: mappingData, error: mappingError } = await supabase
+          .from('user_worker_mappings')
+          .update({
+            last_active: new Date().toISOString(),
+            total_hashrate: worker.hash || 0,
+            total_shares: worker.validShares || 0,
+            metadata: {
+              ...worker,
+              last_updated_from_pool: new Date().toISOString()
+            }
+          })
+          .eq('worker_id', workerId)
+          .select()
+          .single();
+
+        if (mappingError && mappingError.code !== 'PGRST116') {
+          console.error('Failed to update worker mapping:', workerId, mappingError);
+        } else if (mappingData) {
+          console.log('Worker mapping updated:', workerId, 'for wallet:', mappingData.wallet_address);
+        }
+
+        const nowMs = Date.now();
+        const lastHashMs = (worker.lastHash || worker.lts || 0) * 1000;
+        const recentlyActive = lastHashMs > 0 && (nowMs - lastHashMs) < 30 * 60 * 1000;
+        const active = (worker.hash || 0) > 0 || recentlyActive;
+
+        workers.push({
+          identifier: workerId,
+          id: workerId,
+          hash: worker.hash || 0,
+          validShares: worker.validShares || 0,
+          invalidShares: worker.invalidShares || 0,
+          lastHash: worker.lastHash || worker.lts || 0,
+          wallet: mappingData?.wallet_address || null,
+          alias: mappingData?.alias || null,
+          active,
+        });
+      }
+    } else {
+      // FALLBACK: perWorkerStats absent — happens when SupportXMR doesn't include
+      // it in the /stats/ response. Use the /identifiers endpoint to discover
+      // worker names, then enrich each with their individual /identifiers/{id}/stats.
+      console.log('perWorkerStats absent from pool response — falling back to /identifiers endpoint');
+
+      if ((data.hash || 0) > 0) {
+        try {
+          const identifiersUrl = `https://supportxmr.com/api/miner/${minerAddress}/identifiers`;
+          const identResp = await fetch(identifiersUrl, {
+            headers: { 'User-Agent': 'XMRT-DAO/1.0', 'Accept': 'application/json' }
+          });
+
+          if (identResp.ok) {
+            const identifierList: string[] = await identResp.json();
+            console.log(`Identifiers endpoint returned ${identifierList.length} workers:`, identifierList);
+
+            const nowMs = Date.now();
+            const THIRTY_MIN_MS = 30 * 60 * 1000;
+
+            // Fetch per-worker stats in parallel (cap at 10)
+            const workerStatPromises = identifierList.slice(0, 10).map(async (workerId: string) => {
+              try {
+                const wsUrl = `https://supportxmr.com/api/miner/${minerAddress}/identifiers/${encodeURIComponent(workerId)}/stats`;
+                const wsResp = await fetch(wsUrl, {
+                  headers: { 'User-Agent': 'XMRT-DAO/1.0', 'Accept': 'application/json' }
+                });
+                const ws = wsResp.ok ? await wsResp.json() : {};
+
+                const lastHashMs = (ws.lastHash || 0) * 1000;
+                const recentlyActive = lastHashMs > 0 && (nowMs - lastHashMs) < THIRTY_MIN_MS;
+                const active = (ws.hash || 0) > 0 || recentlyActive;
+
+                // Also look up alias from user_worker_mappings
+                const { data: mapping } = await supabase
+                  .from('user_worker_mappings')
+                  .select('alias, wallet_address')
+                  .eq('worker_id', workerId)
+                  .maybeSingle();
+
+                return {
+                  identifier: workerId,
+                  id: workerId,
+                  hash: ws.hash || 0,
+                  validShares: ws.validShares || 0,
+                  invalidShares: ws.invalidShares || 0,
+                  lastHash: ws.lastHash || 0,
+                  wallet: mapping?.wallet_address || null,
+                  alias: mapping?.alias || null,
+                  active,
+                };
+              } catch (e) {
+                console.warn(`Could not fetch stats for identifier "${workerId}":`, e);
+                return {
+                  identifier: workerId,
+                  id: workerId,
+                  hash: 0,
+                  validShares: 0,
+                  invalidShares: 0,
+                  lastHash: 0,
+                  wallet: null,
+                  alias: null,
+                  active: false,
+                };
+              }
+            });
+
+            const resolved = await Promise.all(workerStatPromises);
+            workers.push(...resolved);
+            console.log(`Fallback resolved ${workers.length} workers, ${workers.filter(w => w.active).length} active`);
+          } else {
+            console.warn(`/identifiers endpoint returned ${identResp.status} — cannot resolve worker list`);
+          }
+        } catch (identErr) {
+          console.error('Identifiers fallback failed:', identErr);
+        }
+      } else {
+        console.log('Global hash = 0 and no perWorkerStats — no active workers');
+      }
+    }
+
+    const activeWorkerCount = workers.filter(w => w.active).length;
+    const effectiveWorkerCount = activeWorkerCount > 0 ? activeWorkerCount : workers.length;
+    const activeWorkerIds = workers
+      .filter(w => w.active)
+      .map(w => w.alias || w.identifier);
+
+    // Look up referral code for the main miner wallet
+    let referralInfo = null;
+    try {
+      const { data: refData } = await supabase.rpc('api_get_referral_dashboard', {
+        p_wallet: minerAddress
+      });
+      if (refData) {
+        referralInfo = refData;
+      }
+    } catch (refErr) {
+      // Non-fatal — referral data is bonus info
+      console.log('Referral lookup skipped (non-fatal)');
+    }
+
+    // Return both workers array AND original data with XMR conversion
+    const responseData = {
+      ...data,
+      // Convert atomic units to XMR for all amount fields
+      amtDue: atomicUnitsToXMR(data.amtDue || 0),
+      amtPaid: atomicUnitsToXMR(data.amtPaid || 0),
+      amountDue: atomicUnitsToXMR(data.amtDue || 0),   // Alias for compatibility
+      amountPaid: atomicUnitsToXMR(data.amtPaid || 0), // Alias for compatibility
+      // Worker data — always present (empty array rather than undefined)
+      workers: workers,
+      // Referral info (null if no referral code exists yet)
+      referral: referralInfo,
+      // Pre-computed active worker metrics for easy downstream consumption
+      active_workers: effectiveWorkerCount,
+      worker_ids: activeWorkerIds,
+      total_registered_workers: workers.length,
+    };
+
+    await usageTracker.success({ workers_count: workers.length, has_data: !!data });
+
+
+    return new Response(
+      JSON.stringify(responseData),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+  } catch (error: any) {
+    console.error('Mining proxy error:', error);
+    await usageTracker.failure(error?.message || 'Unknown error', 500);
+
+    return new Response(
+      JSON.stringify({
+        error: 'Failed to fetch mining stats',
+        message: error?.message || 'Unknown error occurred'
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+  }
+})

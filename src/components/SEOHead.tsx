@@ -1,0 +1,73 @@
+import { Helmet } from 'react-helmet-async';
+
+interface SEOHeadProps {
+  title?: string;
+  description?: string;
+  image?: string;
+  url?: string;
+  type?: string;
+  keywords?: string;
+  twitterLabel1?: string;
+  twitterData1?: string;
+  twitterLabel2?: string;
+  twitterData2?: string;
+}
+
+const BASE_URL = 'https://suite-beta.vercel.app';
+
+export const SEOHead = ({ 
+  title = "Scale Your Operations With Suite AI | Suite",
+  description = "Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack.",
+  image = "/suite-social-card.svg",
+  url = "/",
+  type = "website",
+  keywords = "AI operations platform, AI executives, workflow automation, persistent memory, Google integration, GitHub integration, Supabase integration",
+  twitterLabel1 = "⚙️ Workflow Coverage",
+  twitterData1 = "Plan → Execute → Publish",
+  twitterLabel2 = "🔗 Native Integrations",
+  twitterData2 = "Google, GitHub, Supabase"
+}: SEOHeadProps) => {
+  const fullUrl = `${BASE_URL}${url}`;
+  const fullImage = `${BASE_URL}${image}`;
+
+  return (
+    <Helmet>
+      {/* Primary Meta Tags */}
+      <title>{title}</title>
+      <meta name="title" content={title} />
+      <meta name="description" content={description} />
+      <meta name="keywords" content={keywords} />
+      <link rel="canonical" href={fullUrl} />
+
+      {/* Open Graph / Facebook */}
+      <meta property="og:type" content={type} />
+      <meta property="og:url" content={fullUrl} />
+      <meta property="og:title" content={title} />
+      <meta property="og:description" content={description} />
+      <meta property="og:image" content={fullImage} />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+      <meta property="og:site_name" content="Suite" />
+      <meta property="og:locale" content="en_US" />
+
+      {/* Twitter */}
+      <meta name="twitter:card" content="summary_large_image" />
+      <meta name="twitter:url" content={fullUrl} />
+      <meta name="twitter:title" content={title} />
+      <meta name="twitter:description" content={description} />
+      <meta name="twitter:image" content={fullImage} />
+      <meta name="twitter:site" content="@XMRT_DAO" />
+      <meta name="twitter:creator" content="@XMRT_DAO" />
+      <meta name="twitter:label1" content={twitterLabel1} />
+      <meta name="twitter:data1" content={twitterData1} />
+      <meta name="twitter:label2" content={twitterLabel2} />
+      <meta name="twitter:data2" content={twitterData2} />
+
+      {/* LinkedIn */}
+      <meta property="og:article:author" content="Suite by XMRT-DAO" />
+      <meta property="og:article:published_time" content="2024-12-01" />
+    </Helmet>
+  );
+};
+
+export default SEOHead;
