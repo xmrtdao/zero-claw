@@ -47,8 +47,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Default from address for Party Favor Photo
-    const fromAddr = from || 'Party Favor Photo <onboarding@resend.dev>';
+    // Default from address for Party Favor Photo (domain verified on Resend)
+    const fromAddr = from || 'Party Favor Photo <bookings@partyfavorphoto.com>';
 
     // Build the email payload
     const emailPayload: Record<string, unknown> = {
