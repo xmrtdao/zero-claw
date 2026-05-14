@@ -39,7 +39,7 @@ enabled = true
 
 [edge_runtime]
 enabled = true
-policy = ["permissive"]
+policy = "per_worker"
 inspector_port = 8083
 
 [analytics]
@@ -48,5 +48,3 @@ port = 54327
 vector_port = 54328
 gcp_jwt_path = ""
 
-[experimental]
-oriole_mode = false
