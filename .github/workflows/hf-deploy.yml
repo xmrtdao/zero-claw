@@ -1,4 +1,4 @@
-name: Deploy to Hugging Face Space
+name: Deploy ZeroClaw to Hugging Face Space
 
 on:
   push:
@@ -26,9 +26,23 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          python3 -c "from huggingface_hub import HfApi; HfApi(token='${{ secrets.HF_TOKEN }}').upload_folder(folder_path='deploy/huggingface-space', repo_id='XMRTDAO/zero-claw', repo_type='space'); print('Done')"
+          python3 -c "
+from huggingface_hub import HfApi
+api = HfApi(token='${{ secrets.HF_TOKEN }}')
+api.upload_folder(
+    folder_path='deploy/huggingface-space',
+    repo_id='XMRTDAO/zero-claw',
+    repo_type='space'
+)
+print('✅ Deployed to XMRTDAO/zero-claw')
+"
 
       - name: Verify Deployment
         run: |
-          sleep 10
-          curl -s -o /dev/null -w "%{http_code}" https://huggingface.co/spaces/XMRTDAO/zero-claw | grep -qE "200|301" && echo "✅ Space OK" || echo "⚠️ Space check inconclusive"
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://huggingface.co/spaces/XMRTDAO/zero-claw)
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "301" ]; then
+            echo "✅ Space is live (HTTP $STATUS)"
+          else
+            echo "⚠️ Space returned HTTP $STATUS — may still be building"
+          fi
