@@ -6,6 +6,7 @@
  *
  * Stripe Products (created by Joe):
  *   2hr StudioStation: https://buy.stripe.com/8x25kD7ezg6h4iC15YbZe03 ($498)
+ *   3hr StudioStation: https://buy.stripe.com/9B63cv9mH07j3eyeWObZe06 ($747)
  *   4hr StudioStation: https://buy.stripe.com/eVqcN556r4nz16qeWObZe04 ($996)
  */
 
@@ -19,11 +20,13 @@ const corsHeaders = {
 
 const STRIPE_LINKS = {
   'StudioStation-2': 'https://buy.stripe.com/8x25kD7ezg6h4iC15YbZe03',
+  'StudioStation-3': 'https://buy.stripe.com/9B63cv9mH07j3eyeWObZe06',
   'StudioStation-4': 'https://buy.stripe.com/eVqcN556r4nz16qeWObZe04',
 };
 
 const PRICING = {
   'StudioStation-2': { label: '2hr StudioStation', price: 498 },
+  'StudioStation-3': { label: '3hr StudioStation', price: 747 },
   'StudioStation-4': { label: '4hr StudioStation', price: 996 },
 };
 
