@@ -12,6 +12,10 @@ license: mit
 
 # ZeroClaw
 
+**Live Site:** [https://xmrtdao.github.io/zero-claw/](https://xmrtdao.github.io/zero-claw/) | [Fleet Dashboard](https://relay.mobilemonero.com)
+
+---
+
 Zero-Knowledge Governance for AI-Human Hybrid DAOs.
 
 **AMD Developer Hackathon 2026 — AI Agents Track**
