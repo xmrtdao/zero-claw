@@ -28,25 +28,25 @@ jobs:
       # ── Build Noir ZK Circuit ──────────────────────────
       - name: Install nargo (Noir compiler)
         run: |
-          # Detect optimal Noir version from Nargo.toml
           NOIR_VERSION=$(grep compiler_version circuits/Nargo.toml | cut -d'"' -f2)
           echo "Noir version required: $NOIR_VERSION"
           
-          # Download pre-built binary from GitHub releases
-          # Noir releases: https://github.com/noir-lang/noir/releases
-          NOIR_RELEASE="noir-$NOIR_VERSION-x86_64-unknown-linux-musl.tar.gz"
-          curl -sLO "https://github.com/noir-lang/noir/releases/download/v$NOIR_VERSION/$NOIR_RELEASE"
+          # Try official Noir install script
+          curl -sSf https://raw.githubusercontent.com/noir-lang/noir/main/install.sh | bash -s -- --version "$NOIR_VERSION" 2>&1 || \
+          curl -sSf https://noir-lang.org/install.sh | bash -s -- --version "$NOIR_VERSION" 2>&1 || {
+            echo "Pre-built binary not available, building from source (may take 20min)..."
+            cargo install --git https://github.com/noir-lang/noir.git --tag "v$NOIR_VERSION" nargo_cli 2>&1
+          }
           
-          if [ -f "$NOIR_RELEASE" ]; then
-            tar xzf "$NOIR_RELEASE"
-            sudo mv nargo /usr/local/bin/
-          else
-            # Fallback: build from source
-            echo "Pre-built binary not found for v$NOIR_VERSION, building from source..."
-            cargo install --git https://github.com/noir-lang/noir.git --tag "v$NOIR_VERSION" nargo_cli
+          # Add to PATH if installed to ~/.noir
+          if [ -f ~/.noir/nargo/bin/nargo ]; then
+            echo "~/.noir/nargo/bin" >> $GITHUB_PATH
+          fi
+          if [ -f ~/.cargo/bin/nargo ]; then
+            echo "~/.cargo/bin" >> $GITHUB_PATH
           fi
           
-          nargo --version
+          nargo --version || echo "nargo not in PATH yet"
           echo "version=$NOIR_VERSION" >> $GITHUB_OUTPUT
         id: noir-version
 
