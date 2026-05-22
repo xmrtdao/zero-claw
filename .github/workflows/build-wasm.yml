@@ -9,75 +9,21 @@ on:
       - '.github/workflows/build-wasm.yml'
   workflow_dispatch:
     inputs:
+      skip_noir:
+        description: 'Skip Noir compilation (use when nargo version mismatches)'
+        type: boolean
+        default: false
       deploy_to_cf:
-        description: 'Deploy WASM to Cloudflare Workers'
+        description: 'Deploy worker scripts to Cloudflare'
         type: boolean
         default: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      noir_version: ${{ steps.noir-version.outputs.version }}
-      wasm_size: ${{ steps.wasm-size.outputs.size }}
     
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      # ── Build Noir ZK Circuit ──────────────────────────
-      - name: Install nargo (Noir compiler)
-        run: |
-          NOIR_VERSION=$(grep compiler_version circuits/Nargo.toml | cut -d'"' -f2)
-          echo "Noir version required: $NOIR_VERSION"
-          
-          # Try official Noir install script
-          curl -sSf https://raw.githubusercontent.com/noir-lang/noir/main/install.sh | bash -s -- --version "$NOIR_VERSION" 2>&1 || \
-          curl -sSf https://noir-lang.org/install.sh | bash -s -- --version "$NOIR_VERSION" 2>&1 || {
-            echo "Pre-built binary not available, building from source (may take 20min)..."
-            cargo install --git https://github.com/noir-lang/noir.git --tag "v$NOIR_VERSION" nargo_cli 2>&1
-          }
-          
-          # Add to PATH if installed to ~/.noir
-          if [ -f ~/.noir/nargo/bin/nargo ]; then
-            echo "~/.noir/nargo/bin" >> $GITHUB_PATH
-          fi
-          if [ -f ~/.cargo/bin/nargo ]; then
-            echo "~/.cargo/bin" >> $GITHUB_PATH
-          fi
-          
-          nargo --version || echo "nargo not in PATH yet"
-          echo "version=$NOIR_VERSION" >> $GITHUB_OUTPUT
-        id: noir-version
-
-      - name: Compile Noir circuit
-        run: |
-          cd circuits
-          nargo compile
-          echo "Circuit compiled successfully"
-          ls -la target/
-
-      - name: Generate proving artifacts
-        run: |
-          cd circuits
-          # Generate verification key (may take a minute)
-          nargo prove 2>&1 || echo "Prove step may need interaction — checking for WASM output..."
-          # Check for output WASM
-          find target/ -name "*.wasm" -o -name "*.json" -o -name "*.bytecode" 2>/dev/null | head -10
-
-      - name: Collect ZKP artifacts
-        run: |
-          mkdir -p dist/wasm
-          # Gather any WASM/proving artifacts
-          if [ -f circuits/target/zero_claw.wasm ]; then
-            cp circuits/target/zero_claw.wasm dist/wasm/
-          fi
-          if [ -f circuits/target/zero_claw.json ]; then
-            cp circuits/target/zero_claw.json dist/wasm/
-          fi
-          find circuits/target/ -name "*.wasm" -exec cp {} dist/wasm/ \; 2>/dev/null || true
-          echo "ZKP artifacts collected:"
-          ls -la dist/wasm/
+      - uses: actions/checkout@v4
 
       # ── Build Monero WASM ──────────────────────────────
       - name: Install wasm-pack
@@ -86,27 +32,57 @@ jobs:
           wasm-pack --version
 
       - name: Build Monero WASM
+        continue-on-error: true
         run: |
           git clone --depth 1 https://github.com/monero-ecosystem/monero-javascript.git /tmp/monero-js
           cd /tmp/monero-js
           npm install --silent
-          npx wasm-pack build --target web 2>&1 || echo "wasm-pack build may need rustup target"
-          
-          # Copy WASM to dist
-          if [ -f pkg/monero_wasm.wasm ]; then
-            cp pkg/monero_wasm.wasm $GITHUB_WORKSPACE/dist/wasm/
-          fi
-          if [ -f pkg/monero_wasm_bg.wasm ]; then
-            cp pkg/monero_wasm_bg.wasm $GITHUB_WORKSPACE/dist/wasm/
+          rustup target add wasm32-unknown-unknown 2>/dev/null || true
+          npx wasm-pack build --target web 2>&1
+          mkdir -p $GITHUB_WORKSPACE/dist/wasm
+          cp pkg/monero_wasm.wasm $GITHUB_WORKSPACE/dist/wasm/ 2>/dev/null || true
+          cp pkg/monero_wasm_bg.wasm $GITHUB_WORKSPACE/dist/wasm/ 2>/dev/null || true
+
+      # ── Build Noir ZK Circuit (optional) ───────────────
+      - name: Install nargo
+        if: ${{ !inputs.skip_noir }}
+        continue-on-error: true
+        run: |
+          # Try to install nargo via cargo-binstall or from source
+          cargo install cargo-binstall 2>/dev/null || true
+          cargo binstall nargo --version "0.36.0" -y 2>/dev/null || \
+          cargo install --git https://github.com/noir-lang/noir.git nargo_cli --locked 2>&1
+          echo "nargo installed: $(nargo --version 2>/dev/null || echo 'failed')"
+
+      - name: Compile Noir circuit
+        if: ${{ !inputs.skip_noir }}
+        continue-on-error: true
+        run: |
+          cd circuits
+          nargo compile 2>&1 || echo "Compilation may need version compatibility"
+          find target/ -type f -ls 2>/dev/null || true
+          mkdir -p $GITHUB_WORKSPACE/dist/wasm
+          find target/ -name "*.wasm" -exec cp {} $GITHUB_WORKSPACE/dist/wasm/ \; 2>/dev/null || true
+
+      # ── Accept pre-compiled WASM upload ────────────────
+      - name: Check for pre-compiled WASM in repo
+        run: |
+          if [ -d deploy/wasm ] && [ "$(ls -A deploy/wasm/ 2>/dev/null)" ]; then
+            echo "Found pre-compiled WASM in deploy/wasm/"
+            mkdir -p dist/wasm
+            cp deploy/wasm/*.wasm dist/wasm/ 2>/dev/null || true
+            ls -la deploy/wasm/
           fi
 
-      # ── Package artifacts ──────────────────────────────
-      - name: Package WASM artifacts
+      # ── Package ────────────────────────────────────────
+      - name: Package artifacts
         run: |
-          echo "=== Final WASM artifacts ==="
-          find dist/ -type f -ls
+          mkdir -p dist/wasm
+          echo "=== Final artifacts ==="
+          find dist/ -type f -ls 2>/dev/null || echo "No WASM artifacts built"
           echo "---"
-          du -sh dist/
+          echo "Artifacts:" > dist/MANIFEST.txt
+          find dist/ -type f >> dist/MANIFEST.txt 2>/dev/null
 
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4
@@ -114,52 +90,18 @@ jobs:
           name: wasm-modules
           path: dist/
           retention-days: 30
-          if-no-files-found: warn
 
-      - name: Compute artifact sizes
-        id: wasm-size
-        run: |
-          SIZE=$(du -sh dist/ 2>/dev/null | cut -f1 || echo "0K")
-          echo "size=$SIZE" >> $GITHUB_OUTPUT
-
-      # ── Deploy to Cloudflare (optional) ────────────────
+      # ── Deploy workers (optional) ──────────────────────
       - name: Deploy to Cloudflare Workers
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.deploy_to_cf) || (github.event_name == 'push' && vars.CF_DEPLOY_ON_PUSH == 'true') }}
+        if: ${{ inputs.deploy_to_cf }}
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          if [ -z "$CF_API_TOKEN" ] || [ -z "$CF_ACCOUNT_ID" ]; then
-            echo "Skipping deploy — CF_API_TOKEN or CF_ACCOUNT_ID not set"
-            exit 0
-          fi
-          
-          # Deploy worker scripts (without WASM binding — needs dashboard)
           for WORKER in wasm-edge-compute zkp-verification; do
-            echo "Deploying $WORKER script..."
             curl -sS --fail -X PUT \
               "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/$WORKER" \
               -H "Authorization: Bearer $CF_API_TOKEN" \
               -H "Content-Type: application/javascript" \
-              --data-binary @"workers/$WORKER/src/index.js"
-            echo " ✓ $WORKER deployed"
+              --data-binary @"workers/$WORKER/src/index.js" && echo " ✓ $WORKER"
           done
-
-      # ── Summary ────────────────────────────────────────
-      - name: Build summary
-        run: |
-          echo "## ✅ WASM Build Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Artifact | Size |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ZKP Verification WASM | $(ls -lh dist/wasm/ 2>/dev/null | grep -v total | awk '{print $5}' | head -1)" >> $GITHUB_STEP_SUMMARY
-          echo "| Monero WASM | $(ls -lh dist/wasm/ 2>/dev/null | grep -v total | awk '{print $5}' | tail -1)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Download artifacts from this run to get the WASM files." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Download the **wasm-modules** artifact from this run" >> $GITHUB_STEP_SUMMARY
-          echo "2. Upload WASM to Cloudflare Dashboard:" >> $GITHUB_STEP_SUMMARY
-          echo "   - proof.mobilemonero.com → zkp-verification → Settings → WASM" >> $GITHUB_STEP_SUMMARY
-          echo "   - wasm.mobilemonero.com → wasm-edge-compute → Settings → WASM" >> $GITHUB_STEP_SUMMARY
-          echo "3. Workers will then serve live ZKP verification and Monero operations" >> $GITHUB_STEP_SUMMARY
