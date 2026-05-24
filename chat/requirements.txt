@@ -1,0 +1,15 @@
+# Zero-Claw Chat Dependencies
+# Install with: pip install -r requirements.txt
+
+# WebSocket support
+websockets>=12.0
+
+# Cryptography
+cryptography>=41.0.0
+
+# SRP authentication (optional, using built-in implementation)
+# srp>=1.0.21
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
