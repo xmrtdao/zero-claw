@@ -12,6 +12,7 @@ export default defineConfig(async ({ mode }) => {
   }
 
   return {
+    base: '/zero-claw/',
     server: {
       host: "::",
       port: 8080,
