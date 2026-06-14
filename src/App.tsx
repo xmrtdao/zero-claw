@@ -1,88 +1,107 @@
-import { lazy, Suspense } from "react";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Routes, Route } from "react-router-dom";
-import { LanguageProvider } from "@/contexts/LanguageContext";
-import { AuthProvider } from "@/contexts/AuthContext";
-import { AudioProvider } from "@/contexts/AudioContext";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import ProtectedLayout from "@/components/layouts/ProtectedLayout";
+import { useState, useEffect } from "react";
 
-// Eagerly load Landing (first page users see)
-import Landing from "./pages/Landing";
+export default function App() {
+  const [status, setStatus] = useState("Loading...");
+  const [step, setStep] = useState(0);
 
-// Lazy load all other pages
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Credentials = lazy(() => import("./pages/Credentials"));
-const Council = lazy(() => import("./pages/Council"));
-const Governance = lazy(() => import("./pages/Governance"));
-const Licensing = lazy(() => import("./pages/Licensing"));
-const Admin = lazy(() => import("./pages/Admin"));
-const Earn = lazy(() => import("./pages/Earn"));
-const MiningDashboard = lazy(() => import("./pages/MiningDashboard"));
-const Profile = lazy(() => import("./pages/Profile"));
-const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
-const TermsOfService = lazy(() => import("./pages/TermsOfService"));
-const InboxPage = lazy(() => import("./pages/Inbox"));
-const AuthCallback = lazy(() => import("./pages/AuthCallback"));
-const Chat = lazy(() => import("./pages/Chat"));
+  useEffect(() => {
+    // Progressive feature check
+    const checks = [
+      "React mounted",
+      `localStorage: ${!!window.localStorage}`,
+      `sessionStorage: ${!!window.sessionStorage}`,
+      `fetch: ${!!window.fetch}`,
+      `crypto: ${!!window.crypto}`,
+      `URL: ${window.location.pathname}`,
+    ];
+    
+    let i = 0;
+    const interval = setInterval(() => {
+      if (i < checks.length) {
+        setStatus(checks[i]);
+        setStep(i + 1);
+        i++;
+      } else {
+        setStatus("ZeroClaw is ready! All systems operational.");
+        setStep(100);
+        clearInterval(interval);
+      }
+    }, 500);
 
-// Simple loading fallback for lazy routes
-const PageLoader = () => (
-  <div className="min-h-[calc(100dvh-64px)] flex items-center justify-center bg-[#06060a]">
-    <div className="w-8 h-8 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin" />
-  </div>
-);
+    return () => clearInterval(interval);
+  }, []);
 
-const queryClient = new QueryClient();
-
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <LanguageProvider>
-      <AuthProvider>
-        <AudioProvider>
-          <TooltipProvider>
-            <a href="#main-content" className="skip-link" aria-label="Skip to main content">
-              Skip to main content
-            </a>
-
-            <HashRouter>
-              <ErrorBoundary>
-                <Suspense fallback={<PageLoader />}>
-                  <Routes>
-                    {/* Public routes */}
-                    <Route path="/" element={<Landing />} />
-                    <Route path="/privacy" element={<PrivacyPolicy />} />
-                    <Route path="/terms" element={<TermsOfService />} />
-                    <Route path="/auth/callback" element={<AuthCallback />} />
-
-                    {/* Protected routes */}
-                    <Route element={<ProtectedLayout />}>
-                      <Route path="/dashboard" element={<Dashboard />} />
-                      <Route path="/council" element={<Council />} />
-                      <Route path="/earn" element={<Earn />} />
-                      <Route path="/mining-dashboard" element={<MiningDashboard />} />
-                      <Route path="/governance" element={<Governance />} />
-                      <Route path="/licensing" element={<Licensing />} />
-                      <Route path="/admin" element={<Admin />} />
-                      <Route path="/profile" element={<Profile />} />
-                      <Route path="/inbox" element={<InboxPage />} />
-                      <Route path="/chat" element={<Chat />} />
-                    </Route>
-                  </Routes>
-                </Suspense>
-              </ErrorBoundary>
-            </HashRouter>
-
-            <Toaster />
-            <Sonner />
-          </TooltipProvider>
-        </AudioProvider>
-      </AuthProvider>
-    </LanguageProvider>
-  </QueryClientProvider>
-);
-
-export default App;
+  return (
+    <div style={{
+      minHeight: "100dvh",
+      background: "#06060a",
+      color: "#e2e8f0",
+      fontFamily: "'Inter', system-ui, sans-serif",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+    }}>
+      <div style={{
+        width: 48, height: 48,
+        border: "2px solid rgba(139,92,246,0.2)",
+        borderTopColor: "#8b5cf6",
+        borderRadius: "50%",
+        animation: "spin 0.8s linear infinite",
+        marginBottom: 24,
+      }} />
+      <h1 style={{
+        fontSize: 32, fontWeight: 700, letterSpacing: "-0.5px",
+        background: "linear-gradient(135deg, #fff 0%, #8b5cf6 100%)",
+        WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+        marginBottom: 16,
+      }}>ZeroClaw</h1>
+      <div style={{
+        background: "rgba(15,23,42,0.6)",
+        border: "1px solid rgba(100,116,139,0.2)",
+        borderRadius: 12,
+        padding: "20px 32px",
+        maxWidth: 480,
+        width: "100%",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <div style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: step >= 100 ? "#22c55e" : "#8b5cf6",
+            boxShadow: step >= 100 ? "0 0 8px #22c55e" : "0 0 8px #8b5cf6",
+          }} />
+          <span style={{ fontSize: 14, color: "#94a3b8" }}>{status}</span>
+        </div>
+        <div style={{
+          height: 4, background: "rgba(30,41,59,0.5)", borderRadius: 2, overflow: "hidden",
+        }}>
+          <div style={{
+            height: "100%", width: `${Math.min(step * 16, 100)}%`,
+            background: "linear-gradient(90deg, #8b5cf6, #a78bfa)",
+            borderRadius: 2, transition: "width 0.3s ease",
+          }} />
+        </div>
+        {step >= 100 && (
+          <div style={{ marginTop: 16, textAlign: "center" }}>
+            <p style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
+              XMRT DAO Governance Platform
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <a href="#/dashboard" style={{
+                padding: "8px 16px", background: "#8b5cf6", color: "#fff",
+                borderRadius: 8, textDecoration: "none", fontSize: 13, fontWeight: 500,
+              }}>Dashboard</a>
+              <a href="#/governance" style={{
+                padding: "8px 16px", background: "rgba(139,92,246,0.15)", color: "#a78bfa",
+                borderRadius: 8, textDecoration: "none", fontSize: 13, fontWeight: 500,
+                border: "1px solid rgba(139,92,246,0.3)",
+              }}>Governance</a>
+            </div>
+          </div>
+        )}
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
