@@ -3,8 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#06060a">
+
+  <!-- SEO Meta Tags -->
   <title>ZeroClaw — XMRT DAO</title>
+  <meta name="description" content="ZeroClaw is a ZK-powered DAO voting and on-chain governance platform built by XMRT DAO. Secure, private, and decentralized governance for the Monero community.">
+  <meta name="keywords" content="ZeroClaw, XMRT DAO, DAO governance, ZK voting, Monero, decentralized governance, on-chain voting">
+  <meta name="author" content="XMRT DAO">
+  <link rel="canonical" href="https://xmrtdao.github.io/zero-claw/">
+
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://xmrtdao.github.io/zero-claw/">
+  <meta property="og:title" content="ZeroClaw — XMRT DAO Governance">
+  <meta property="og:description" content="ZK-powered DAO voting and on-chain governance platform built by XMRT DAO.">
+  <meta property="og:image" content="https://xmrtdao.github.io/zero-claw/og-image.png">
+  <meta property="og:site_name" content="ZeroClaw">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ZeroClaw — XMRT DAO Governance">
+  <meta name="twitter:description" content="ZK-powered DAO voting and on-chain governance platform built by XMRT DAO.">
+  <meta name="twitter:image" content="https://xmrtdao.github.io/zero-claw/og-image.png">
+
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -104,9 +128,29 @@
       margin-top: auto;
     }
     footer a { color: var(--accent); text-decoration: none; }
+    /* Noscript styles */
+    .noscript-msg {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+      background: #b91c1c;
+      color: #fff;
+      text-align: center;
+      padding: 1rem;
+      font-family: 'Rajdhani', system-ui, sans-serif;
+      font-weight: 500;
+    }
   </style>
 </head>
 <body>
+  <noscript>
+    <div class="noscript-msg">
+      JavaScript is required to use ZeroClaw. Please enable JavaScript in your browser settings to continue.
+    </div>
+  </noscript>
+
   <section class="hero">
     <div class="badge">XMRT DAO Product</div>
     <h1>ZeroClaw</h1>

@@ -2,10 +2,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AudioProvider } from "@/contexts/AudioContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ProtectedLayout from "@/components/layouts/ProtectedLayout";
 import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
@@ -39,32 +40,34 @@ const App = () => (
               Skip to main content
             </a>
 
-            <BrowserRouter>
-              <Routes>
-                {/* Public routes */}
-                <Route path="/" element={<Landing />} />
-                <Route path="/privacy" element={<PrivacyPolicy />} />
-                <Route path="/terms" element={<TermsOfService />} />
-                <Route path="/auth/callback" element={<AuthCallback />} />
+            <HashRouter>
+              <ErrorBoundary>
+                <Routes>
+                  {/* Public routes */}
+                  <Route path="/" element={<Landing />} />
+                  <Route path="/privacy" element={<PrivacyPolicy />} />
+                  <Route path="/terms" element={<TermsOfService />} />
+                  <Route path="/auth/callback" element={<AuthCallback />} />
 
-                {/* Protected routes - require authentication */}
-                <Route element={<ProtectedLayout />}>
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/council" element={<Council />} />
-                  <Route path="/earn" element={<Earn />} />
-                  <Route path="/mining-dashboard" element={<MiningDashboard />} />
-                  <Route path="/governance" element={<Governance />} />
-                  <Route path="/licensing" element={<Licensing />} />
-                  <Route path="/credentials" element={<Credentials />} />
-                  <Route path="/profile" element={<Profile />} />
-                  <Route path="/admin" element={<Admin />} />
-                  <Route path="/inbox" element={<InboxPage />} />
-                  {/* Legacy redirects */}
-                  <Route path="/treasury" element={<Earn />} />
-                  <Route path="/contributors" element={<Earn />} />
-                </Route>
-              </Routes>
-            </BrowserRouter>
+                  {/* Protected routes - require authentication */}
+                  <Route element={<ProtectedLayout />}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/council" element={<Council />} />
+                    <Route path="/earn" element={<Earn />} />
+                    <Route path="/mining-dashboard" element={<MiningDashboard />} />
+                    <Route path="/governance" element={<Governance />} />
+                    <Route path="/licensing" element={<Licensing />} />
+                    <Route path="/credentials" element={<Credentials />} />
+                    <Route path="/profile" element={<Profile />} />
+                    <Route path="/admin" element={<Admin />} />
+                    <Route path="/inbox" element={<InboxPage />} />
+                    {/* Legacy redirects */}
+                    <Route path="/treasury" element={<Earn />} />
+                    <Route path="/contributors" element={<Earn />} />
+                  </Route>
+                </Routes>
+              </ErrorBoundary>
+            </HashRouter>
 
             <Toaster />
             <Sonner />
