@@ -2,16 +2,41 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
+// Lazy client creation - doesn't throw on import, only on actual usage
+let client: ReturnType<typeof createClient<Database>> | null = null;
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
+function getClient() {
+  if (!client) {
+    if (!SUPABASE_URL) {
+      console.warn('[Supabase] VITE_SUPABASE_URL not set. Supabase features will be unavailable.');
+    }
+    client = createClient<Database>(SUPABASE_URL || 'https://placeholder.supabase.co', SUPABASE_PUBLISHABLE_KEY || 'placeholder', {
+      auth: {
+        storage: localStorage,
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+      global: {
+        headers: {
+          'x-client-info': 'zero-claw',
+        },
+      },
+    });
   }
+  return client;
+}
+
+// Export a Proxy that lazily creates the client on first access
+export const supabase = new Proxy({} as ReturnType<typeof createClient<Database>>, {
+  get(_, prop: string) {
+    const c = getClient();
+    const value = (c as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(c);
+    }
+    return value;
+  },
 });
