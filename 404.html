@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#06060a">
+  <title>ZeroClaw — XMRT DAO</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #06060a; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; min-height: 100dvh; }
+    #loading-fallback { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #06060a; z-index: 9999; }
+    #loading-fallback .spinner { width: 48px; height: 48px; border: 2px solid rgba(139,92,246,0.2); border-top-color: #8b5cf6; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 20px; }
+    #loading-fallback h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; background: linear-gradient(135deg, #fff 0%, #8b5cf6 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+    #loading-fallback p { font-size: 14px; color: #64748b; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+  <script type="text/javascript">
+    // SPA redirect for GitHub Pages - redirect all 404s to index.html
+    var l = window.location;
+    l.replace(
+      l.protocol + '//' + l.hostname +
+      (l.port ? ':' + l.port : '') +
+      '/zero-claw/' +
+      '?redirect=' + encodeURIComponent(l.pathname + l.search + l.hash)
+    );
+  </script>
+</head>
+<body>
+  <div id="loading-fallback">
+    <div class="spinner"></div>
+    <h1>ZeroClaw</h1>
+    <p>Redirecting...</p>
+  </div>
+</body>
+</html>

@@ -4,40 +4,50 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#06060a">
-
-  <!-- SEO Meta Tags -->
   <title>ZeroClaw — XMRT DAO</title>
-  <meta name="description" content="ZeroClaw is a ZK-powered DAO voting and on-chain governance platform built by XMRT DAO. Secure, private, and decentralized governance for the Monero community.">
-  <meta name="keywords" content="ZeroClaw, XMRT DAO, DAO governance, ZK voting, Monero, decentralized governance, on-chain voting">
-  <meta name="author" content="XMRT DAO">
+  <meta name="description" content="ZeroClaw is a ZK-powered DAO voting and on-chain governance platform built by XMRT DAO.">
   <link rel="canonical" href="https://xmrtdao.github.io/zero-claw/">
-
-  <!-- Open Graph / Social Media -->
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://xmrtdao.github.io/zero-claw/">
-  <meta property="og:title" content="ZeroClaw — XMRT DAO Governance">
-  <meta property="og:description" content="ZK-powered DAO voting and on-chain governance platform built by XMRT DAO.">
-  <meta property="og:image" content="https://xmrtdao.github.io/zero-claw/og-image.png">
-  <meta property="og:site_name" content="ZeroClaw">
-
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="ZeroClaw — XMRT DAO Governance">
-  <meta name="twitter:description" content="ZK-powered DAO voting and on-chain governance platform built by XMRT DAO.">
-  <meta name="twitter:image" content="https://xmrtdao.github.io/zero-claw/og-image.png">
-
-  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* Critical CSS inlined for instant dark theme */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: #06060a; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; min-height: 100dvh; }
+    #root { min-height: 100dvh; }
+    #loading-fallback { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #06060a; z-index: 9999; transition: opacity 0.5s ease; }
+    #loading-fallback.fade-out { opacity: 0; pointer-events: none; }
+    #loading-fallback .spinner { width: 48px; height: 48px; border: 2px solid rgba(139,92,246,0.2); border-top-color: #8b5cf6; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 20px; }
+    #loading-fallback h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; background: linear-gradient(135deg, #fff 0%, #8b5cf6 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+    #loading-fallback p { font-size: 14px; color: #64748b; }
+    #loading-fallback .error { color: #ef4444; font-size: 13px; margin-top: 12px; max-width: 400px; text-align: center; padding: 0 20px; display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    noscript div { position: fixed; top: 0; left: 0; right: 0; z-index: 99999; background: #b91c1c; color: #fff; text-align: center; padding: 1rem; font-family: system-ui; font-weight: 500; }
+  </style>
+  <script>
+    // Hide loading screen when React mounts
+    window.__hideLoading = function() {
+      var el = document.getElementById('loading-fallback');
+      if (el) { el.classList.add('fade-out'); setTimeout(function() { el.remove(); }, 500); }
+    };
+    // Show error in loading screen
+    window.__showLoadingError = function(msg) {
+      var el = document.getElementById('loading-error');
+      if (el) { el.textContent = msg; el.style.display = 'block'; }
+    };
+  </script>
 </head>
 <body>
   <noscript>
-    <div style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;text-align:center;padding:1rem;font-family:system-ui;font-weight:500;">
-      JavaScript is required to use ZeroClaw. Please enable JavaScript in your browser settings to continue.
-    </div>
+    <div>JavaScript is required to use ZeroClaw. Please enable JavaScript in your browser settings.</div>
   </noscript>
+  <div id="loading-fallback">
+    <div class="spinner"></div>
+    <h1>ZeroClaw</h1>
+    <p>Loading XMRT DAO Governance...</p>
+    <div id="loading-error" class="error"></div>
+  </div>
   <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
+  <script type="module" src="/zero-claw/src/main.tsx"></script>
 </body>
 </html>
