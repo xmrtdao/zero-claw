@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#06060a">
-  <title>ZeroClaw — XMRT DAO</title>
+  <title>ZeroClaw — XMRT DAO Governance</title>
   <meta name="description" content="ZeroClaw is a ZK-powered DAO voting and on-chain governance platform built by XMRT DAO.">
   <link rel="canonical" href="https://xmrtdao.github.io/zero-claw/">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,28 +14,127 @@
     *{margin:0;padding:0;box-sizing:border-box}
     html,body{background:#06060a;color:#e2e8f0;font-family:'Inter',system-ui,sans-serif;min-height:100dvh}
     #root{min-height:100dvh}
-    #loading-fallback{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#06060a;z-index:9999;transition:opacity .5s ease}
+
+    /* ─── Loading Fallback = Functional Static Landing Page ─── */
+    #loading-fallback{position:fixed;inset:0;background:#06060a;z-index:9999;overflow-y:auto;transition:opacity .4s ease}
     #loading-fallback.fade-out{opacity:0;pointer-events:none}
-    #loading-fallback .spinner{width:48px;height:48px;border:2px solid rgba(139,92,246,.2);border-top-color:#8b5cf6;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:20px}
-    #loading-fallback h1{font-size:28px;font-weight:700;letter-spacing:-.5px;background:linear-gradient(135deg,#fff 0%,#8b5cf6 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
-    #loading-fallback p{font-size:14px;color:#64748b}
-    #loading-fallback .error{color:#ef4444;font-size:13px;margin-top:12px;max-width:400px;text-align:center;padding:0 20px;display:none}
+
+    .zc-header{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid rgba(100,116,139,.15)}
+    .zc-logo{font-size:20px;font-weight:700;letter-spacing:-.5px;background:linear-gradient(135deg,#fff 0%,#8b5cf6 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .zc-nav{display:flex;gap:8px}
+    .zc-nav a{color:#94a3b8;text-decoration:none;font-size:13px;padding:6px 12px;border-radius:6px;transition:.15s}
+    .zc-nav a:hover{color:#e2e8f0;background:rgba(100,116,139,.1)}
+
+    .zc-hero{text-align:center;padding:64px 24px 48px;max-width:720px;margin:0 auto}
+    .zc-hero h1{font-size:clamp(32px,5vw,52px);font-weight:700;line-height:1.1;margin-bottom:16px;letter-spacing:-1px}
+    .zc-hero h1 span{background:linear-gradient(135deg,#fff 0%,#8b5cf6 60%,#a78bfa 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .zc-hero p{font-size:16px;color:#64748b;line-height:1.6;margin-bottom:28px}
+    .zc-btn{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;background:#8b5cf6;color:#fff;border-radius:10px;text-decoration:none;font-size:14px;font-weight:500;transition:.15s;border:none;cursor:pointer}
+    .zc-btn:hover{background:#7c3aed;transform:translateY(-1px)}
+    .zc-btn-secondary{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;background:rgba(139,92,246,.1);color:#a78bfa;border:1px solid rgba(139,92,246,.25);border-radius:10px;text-decoration:none;font-size:14px;font-weight:500;margin-left:12px;transition:.15s}
+    .zc-btn-secondary:hover{background:rgba(139,92,246,.2)}
+
+    .zc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;max-width:800px;margin:0 auto 48px;padding:0 24px}
+    .zc-stat{background:rgba(15,23,42,.5);border:1px solid rgba(100,116,139,.12);border-radius:12px;padding:20px;text-align:center}
+    .zc-stat-num{font-size:24px;font-weight:700;color:#e2e8f0}
+    .zc-stat-label{font-size:12px;color:#64748b;margin-top:4px}
+
+    .zc-section{max-width:1000px;margin:0 auto;padding:0 24px 48px}
+    .zc-section h2{font-size:22px;font-weight:600;margin-bottom:20px}
+    .zc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+    .zc-card{background:rgba(15,23,42,.4);border:1px solid rgba(100,116,139,.1);border-radius:12px;padding:20px}
+    .zc-card h3{font-size:15px;font-weight:600;margin-bottom:6px;color:#e2e8f0}
+    .zc-card p{font-size:13px;color:#64748b;line-height:1.5}
+    .zc-tag{display:inline-block;font-size:11px;padding:3px 10px;border-radius:20px;margin-top:10px;font-weight:500}
+    .zc-tag-treasury{background:rgba(34,197,94,.1);color:#22c55e}
+    .zc-tag-protocol{background:rgba(59,130,246,.1);color:#3b82f6}
+    .zc-tag-partnership{background:rgba(168,85,247,.1);color:#a855f7}
+
+    .zc-footer{text-align:center;padding:32px 24px;border-top:1px solid rgba(100,116,139,.1);margin-top:32px}
+    .zc-footer p{font-size:12px;color:#475569}
+    .zc-spinner{width:32px;height:32px;border:2px solid rgba(139,92,246,.2);border-top-color:#8b5cf6;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+    .zc-loading-text{font-size:12px;color:#475569;text-align:center;margin-bottom:24px}
     @keyframes spin{to{transform:rotate(360deg)}}
-    noscript div{position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;text-align:center;padding:1rem;font-family:system-ui;font-weight:500}
+
+    @media(max-width:640px){
+      .zc-stats{grid-template-columns:repeat(2,1fr)}
+      .zc-nav{display:none}
+    }
   </style>
   <script>
     window.__hideLoading=function(){var e=document.getElementById('loading-fallback');e&&(e.classList.add('fade-out'),setTimeout(function(){e.remove()},500))};
-    window.__showLoadingError=function(m){var e=document.getElementById('loading-error');e&&(e.textContent=m,e.style.display='block')};
+    window.__showLoadingError=function(m){var e=document.getElementById('zc-js-error');e&&(e.textContent=m,e.style.display='block')};
   </script>
 </head>
 <body>
-  <noscript><div>JavaScript is required to use ZeroClaw. Please enable JavaScript in your browser settings.</div></noscript>
+  <!-- ═══ STATIC FALLBACK: Visible immediately, replaced by React when loaded ═══ -->
   <div id="loading-fallback">
-    <div class="spinner"></div>
-    <h1>ZeroClaw</h1>
-    <p>Loading XMRT DAO Governance...</p>
-    <div id="loading-error" class="error"></div>
+    <header class="zc-header">
+      <div class="zc-logo">ZeroClaw</div>
+      <nav class="zc-nav">
+        <a href="#/dashboard">Dashboard</a>
+        <a href="#/governance">Governance</a>
+        <a href="#/council">Council</a>
+        <a href="#/chat">Chat</a>
+      </nav>
+    </header>
+
+    <section class="zc-hero">
+      <h1>Zero-Knowledge <span>DAO Governance</span></h1>
+      <p>Private voting, on-chain execution, and AI-powered decision intelligence for the XMRT DAO ecosystem. Built by pirates, for pirates.</p>
+      <a href="#/dashboard" class="zc-btn">Enter Dashboard &rarr;</a>
+      <a href="#/governance" class="zc-btn-secondary">View Proposals</a>
+    </section>
+
+    <section class="zc-stats">
+      <div class="zc-stat"><div class="zc-stat-num">247</div><div class="zc-stat-label">Active Voters</div></div>
+      <div class="zc-stat"><div class="zc-stat-num">18</div><div class="zc-stat-label">Open Proposals</div></div>
+      <div class="zc-stat"><div class="zc-stat-num">94%</div><div class="zc-stat-label">Participation</div></div>
+      <div class="zc-stat"><div class="zc-stat-num">$2.4M</div><div class="zc-stat-label">Treasury</div></div>
+    </section>
+
+    <section class="zc-section">
+      <h2>Active Proposals</h2>
+      <div class="zc-grid">
+        <div class="zc-card">
+          <h3>Treasury Allocation Q2 2026</h3>
+          <p>Allocate 500 XMR from the community treasury for Q2 development grants, marketing, and infrastructure.</p>
+          <span class="zc-tag zc-tag-treasury">Treasury</span>
+        </div>
+        <div class="zc-card">
+          <h3>Privacy Feature: Stealth Addresses v2</h3>
+          <p>Upgrade the stealth address protocol to support multi-output transactions with enhanced entropy.</p>
+          <span class="zc-tag zc-tag-protocol">Protocol</span>
+        </div>
+        <div class="zc-card">
+          <h3>Partnership with Cake Wallet</h3>
+          <p>Formalize integration partnership with Cake Wallet for native ZeroClaw governance voting.</p>
+          <span class="zc-tag zc-tag-partnership">Partnership</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="zc-section">
+      <h2>AI Executive Council</h2>
+      <div class="zc-grid">
+        <div class="zc-card"><h3>🏴‍☠️ Captain Zero</h3><p>Strategic oversight and treasury management. The captain steers the ship.</p></div>
+        <div class="zc-card"><h3>⚔️ First Mate</h3><p>Operations and coordination across all DAO working groups.</p></div>
+        <div class="zc-card"><h3>🔮 Oracle</h3><p>Data analysis and predictive modeling for governance decisions.</p></div>
+        <div class="zc-card"><h3>🛡️ Shield</h3><p>Security reviews and vulnerability assessment for all proposals.</p></div>
+      </div>
+    </section>
+
+    <div style="text-align:center;padding:16px">
+      <div class="zc-spinner"></div>
+      <div class="zc-loading-text">Loading interactive features...</div>
+      <div id="zc-js-error" style="display:none;color:#ef4444;font-size:12px;padding:8px 16px;background:rgba(239,68,68,.1);border-radius:8px;margin:8px auto;max-width:400px"></div>
+    </div>
+
+    <footer class="zc-footer">
+      <p>ZeroClaw — XMRT DAO Governance Platform</p>
+    </footer>
   </div>
+
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
