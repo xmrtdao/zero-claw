@@ -1,58 +1,54 @@
 import { createRoot } from 'react-dom/client'
-import { HelmetProvider } from 'react-helmet-async'
 import App from './App.tsx'
 import './index.css'
 
-// ─── Graceful Worker Startup ──────────────────────────────────────────────
-// Wrap optional background worker startup to prevent it from blocking render
-let workerStarted = false;
-try {
-  const { memoryVectorizationWorker } = await import('./services/memoryVectorizationWorker');
-  // Defer worker start to not block initial render
-  setTimeout(() => {
-    try {
-      memoryVectorizationWorker.start();
-      workerStarted = true;
-    } catch (e) {
-      console.warn('[ZeroClaw] Background worker start failed (non-critical):', e);
-    }
-  }, 2000);
-} catch (e) {
-  console.warn('[ZeroClaw] Background worker module not available (non-critical):', e);
-}
-
-// ─── Global Error Handler ─────────────────────────────────────────────────
+// ─── Global Error Handlers (before React mounts) ──────────────────────────
 window.addEventListener('error', (event) => {
   console.error('[ZeroClaw] Runtime error:', event.error);
-  if (window.__showLoadingError) {
-    window.__showLoadingError('An error occurred loading the app. Please refresh the page.');
-  }
+  const el = document.getElementById('loading-error');
+  if (el) { el.textContent = 'Error: ' + (event.error?.message || 'Unknown error'); el.style.display = 'block'; }
 });
 
 window.addEventListener('unhandledrejection', (event) => {
-  console.error('[ZeroClaw] Unhandled promise rejection:', event.reason);
+  console.error('[ZeroClaw] Unhandled rejection:', event.reason);
+  const el = document.getElementById('loading-error');
+  if (el && el.style.display !== 'block') {
+    el.textContent = 'Error loading app. Try refreshing or clearing cache.';
+    el.style.display = 'block';
+  }
+  event.preventDefault();
 });
 
-// ─── Mount React App ──────────────────────────────────────────────────────
+// Safety timeout: show error if React doesn't mount in 15s
+setTimeout(() => {
+  const root = document.getElementById('root');
+  if (root && root.children.length === 0) {
+    const el = document.getElementById('loading-error');
+    if (el) { el.textContent = 'Timed out. Check console (F12) or try refreshing.'; el.style.display = 'block'; }
+  }
+}, 15000);
+
+// ─── Mount React ──────────────────────────────────────────────────────────
 const rootEl = document.getElementById('root');
 if (!rootEl) {
-  console.error('[ZeroClaw] Root element #root not found');
-  if (window.__showLoadingError) {
-    window.__showLoadingError('Critical: Application mount point missing.');
-  }
-  throw new Error('Root element #root not found');
+  console.error('[ZeroClaw] #root element not found');
+} else {
+  const root = createRoot(rootEl);
+  root.render(<App />);
 }
 
-const root = createRoot(rootEl);
-root.render(
-  <HelmetProvider>
-    <App />
-  </HelmetProvider>
-);
-
-// Hide loading screen once React has mounted
+// Hide loading screen after a brief delay to allow React to paint
 setTimeout(() => {
-  if (window.__hideLoading) window.__hideLoading();
-}, 100);
+  const fallback = document.getElementById('loading-fallback');
+  if (fallback) { fallback.classList.add('fade-out'); setTimeout(() => fallback.remove(), 500); }
+}, 800);
 
-console.log('[ZeroClaw] App mounted. Worker started:', workerStarted);
+// ─── Lazy-start optional worker ───────────────────────────────────────────
+try {
+  setTimeout(async () => {
+    const mod = await import('./services/memoryVectorizationWorker.ts').catch(() => null);
+    if (mod && (mod as any).memoryVectorizationWorker) {
+      try { (mod as any).memoryVectorizationWorker.start(); } catch (e) { /* non-critical */ }
+    }
+  }, 3000);
+} catch (e) { /* non-critical */ }
