@@ -1,8 +1,14 @@
 import { lazy, Suspense } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HashRouter, Routes, Route } from "react-router-dom";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { AudioProvider } from "@/contexts/AudioContext";
+import { LanguageProvider } from "@/contexts/LanguageContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
-// ALL pages lazy-loaded to minimize initial bundle
 const Landing = lazy(() => import("./pages/Landing"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Council = lazy(() => import("./pages/Council"));
@@ -24,36 +30,43 @@ const PageLoader = () => (
   </div>
 );
 
-// Simple wrapper that provides contexts without heavy providers
-function MinimalProviders({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
-}
+const queryClient = new QueryClient();
 
 export default function App() {
   return (
-    <HashRouter>
-      <ErrorBoundary>
-        <MinimalProviders>
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route path="/privacy" element={<PrivacyPolicy />} />
-              <Route path="/terms" element={<TermsOfService />} />
-              <Route path="/auth/callback" element={<AuthCallback />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/council" element={<Council />} />
-              <Route path="/earn" element={<Earn />} />
-              <Route path="/mining-dashboard" element={<MiningDashboard />} />
-              <Route path="/governance" element={<Governance />} />
-              <Route path="/licensing" element={<Licensing />} />
-              <Route path="/admin" element={<Admin />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/inbox" element={<InboxPage />} />
-              <Route path="/chat" element={<Chat />} />
-            </Routes>
-          </Suspense>
-        </MinimalProviders>
-      </ErrorBoundary>
-    </HashRouter>
+    <QueryClientProvider client={queryClient}>
+      <LanguageProvider>
+        <AuthProvider>
+          <AudioProvider>
+            <TooltipProvider>
+              <HashRouter>
+                <ErrorBoundary>
+                  <Suspense fallback={<PageLoader />}>
+                    <Routes>
+                      <Route path="/" element={<Landing />} />
+                      <Route path="/privacy" element={<PrivacyPolicy />} />
+                      <Route path="/terms" element={<TermsOfService />} />
+                      <Route path="/auth/callback" element={<AuthCallback />} />
+                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/council" element={<Council />} />
+                      <Route path="/earn" element={<Earn />} />
+                      <Route path="/mining-dashboard" element={<MiningDashboard />} />
+                      <Route path="/governance" element={<Governance />} />
+                      <Route path="/licensing" element={<Licensing />} />
+                      <Route path="/admin" element={<Admin />} />
+                      <Route path="/profile" element={<Profile />} />
+                      <Route path="/inbox" element={<InboxPage />} />
+                      <Route path="/chat" element={<Chat />} />
+                    </Routes>
+                  </Suspense>
+                </ErrorBoundary>
+              </HashRouter>
+              <Toaster />
+              <Sonner />
+            </TooltipProvider>
+          </AudioProvider>
+        </AuthProvider>
+      </LanguageProvider>
+    </QueryClientProvider>
   );
 }
