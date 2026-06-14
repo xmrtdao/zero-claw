@@ -8,12 +8,14 @@ import { SEOHead } from '@/components/SEOHead';
 import { useAudio } from '@/contexts/AudioContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { supabase } from '@/integrations/supabase/client';
+import { DashboardSkeleton } from '@/components/skeletons/DashboardSkeleton';
 
 const DASHBOARD_EDGE_FUNCTION_TOTAL = 293;
 
 const Index = () => {
   const { playWelcomeOnce } = useAudio();
   const { t } = useLanguage();
+  const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
     totalExecutions: 0,
     activeAgents: 0,
@@ -117,6 +119,7 @@ const Index = () => {
         userWorkflows: userWorkflows.count || 0,
         registeredEdgeFunctions: DASHBOARD_EDGE_FUNCTION_TOTAL,
       });
+      setLoading(false);
     };
 
     fetchStats();
@@ -166,6 +169,10 @@ const Index = () => {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <>

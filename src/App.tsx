@@ -22,6 +22,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import InboxPage from "./pages/Inbox";
 import AuthCallback from "./pages/AuthCallback";
+import Chat from "./pages/Chat";
 
 const queryClient = new QueryClient();
 
@@ -61,6 +62,7 @@ const App = () => (
                     <Route path="/profile" element={<Profile />} />
                     <Route path="/admin" element={<Admin />} />
                     <Route path="/inbox" element={<InboxPage />} />
+                    <Route path="/chat" element={<Chat />} />
                     {/* Legacy redirects */}
                     <Route path="/treasury" element={<Earn />} />
                     <Route path="/contributors" element={<Earn />} />
