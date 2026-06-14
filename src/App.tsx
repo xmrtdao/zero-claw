@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,21 +9,32 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { AudioProvider } from "@/contexts/AudioContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ProtectedLayout from "@/components/layouts/ProtectedLayout";
+
+// Eagerly load Landing (first page users see)
 import Landing from "./pages/Landing";
-import Dashboard from "./pages/Dashboard";
-import Credentials from "./pages/Credentials";
-import Council from "./pages/Council";
-import Governance from "./pages/Governance";
-import Licensing from "./pages/Licensing";
-import Admin from "./pages/Admin";
-import Earn from "./pages/Earn";
-import MiningDashboard from "./pages/MiningDashboard";
-import Profile from "./pages/Profile";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import TermsOfService from "./pages/TermsOfService";
-import InboxPage from "./pages/Inbox";
-import AuthCallback from "./pages/AuthCallback";
-import Chat from "./pages/Chat";
+
+// Lazy load all other pages
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Credentials = lazy(() => import("./pages/Credentials"));
+const Council = lazy(() => import("./pages/Council"));
+const Governance = lazy(() => import("./pages/Governance"));
+const Licensing = lazy(() => import("./pages/Licensing"));
+const Admin = lazy(() => import("./pages/Admin"));
+const Earn = lazy(() => import("./pages/Earn"));
+const MiningDashboard = lazy(() => import("./pages/MiningDashboard"));
+const Profile = lazy(() => import("./pages/Profile"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = lazy(() => import("./pages/TermsOfService"));
+const InboxPage = lazy(() => import("./pages/Inbox"));
+const AuthCallback = lazy(() => import("./pages/AuthCallback"));
+const Chat = lazy(() => import("./pages/Chat"));
+
+// Simple loading fallback for lazy routes
+const PageLoader = () => (
+  <div className="min-h-[calc(100dvh-64px)] flex items-center justify-center bg-[#06060a]">
+    <div className="w-8 h-8 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin" />
+  </div>
+);
 
 const queryClient = new QueryClient();
 
@@ -32,42 +44,35 @@ const App = () => (
       <AuthProvider>
         <AudioProvider>
           <TooltipProvider>
-            {/* Skip Navigation Link for Accessibility */}
-            <a
-              href="#main-content"
-              className="skip-link"
-              aria-label="Skip to main content"
-            >
+            <a href="#main-content" className="skip-link" aria-label="Skip to main content">
               Skip to main content
             </a>
 
             <HashRouter>
               <ErrorBoundary>
-                <Routes>
-                  {/* Public routes */}
-                  <Route path="/" element={<Landing />} />
-                  <Route path="/privacy" element={<PrivacyPolicy />} />
-                  <Route path="/terms" element={<TermsOfService />} />
-                  <Route path="/auth/callback" element={<AuthCallback />} />
+                <Suspense fallback={<PageLoader />}>
+                  <Routes>
+                    {/* Public routes */}
+                    <Route path="/" element={<Landing />} />
+                    <Route path="/privacy" element={<PrivacyPolicy />} />
+                    <Route path="/terms" element={<TermsOfService />} />
+                    <Route path="/auth/callback" element={<AuthCallback />} />
 
-                  {/* Protected routes - require authentication */}
-                  <Route element={<ProtectedLayout />}>
-                    <Route path="/dashboard" element={<Dashboard />} />
-                    <Route path="/council" element={<Council />} />
-                    <Route path="/earn" element={<Earn />} />
-                    <Route path="/mining-dashboard" element={<MiningDashboard />} />
-                    <Route path="/governance" element={<Governance />} />
-                    <Route path="/licensing" element={<Licensing />} />
-                    <Route path="/credentials" element={<Credentials />} />
-                    <Route path="/profile" element={<Profile />} />
-                    <Route path="/admin" element={<Admin />} />
-                    <Route path="/inbox" element={<InboxPage />} />
-                    <Route path="/chat" element={<Chat />} />
-                    {/* Legacy redirects */}
-                    <Route path="/treasury" element={<Earn />} />
-                    <Route path="/contributors" element={<Earn />} />
-                  </Route>
-                </Routes>
+                    {/* Protected routes */}
+                    <Route element={<ProtectedLayout />}>
+                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/council" element={<Council />} />
+                      <Route path="/earn" element={<Earn />} />
+                      <Route path="/mining-dashboard" element={<MiningDashboard />} />
+                      <Route path="/governance" element={<Governance />} />
+                      <Route path="/licensing" element={<Licensing />} />
+                      <Route path="/admin" element={<Admin />} />
+                      <Route path="/profile" element={<Profile />} />
+                      <Route path="/inbox" element={<InboxPage />} />
+                      <Route path="/chat" element={<Chat />} />
+                    </Route>
+                  </Routes>
+                </Suspense>
               </ErrorBoundary>
             </HashRouter>
 
